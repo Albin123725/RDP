@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  novnc-desktop:
+    build: .
+    container_name: ubuntu-novnc-desktop
+    ports:
+      - "6080:6080"
+      - "5901:5901"
+    environment:
+      - VNC_PASSWORD=${VNC_PASSWORD:-password}
+      - VNC_RESOLUTION=${VNC_RESOLUTION:-1920x1080}
+      - VNC_COL_DEPTH=24
+    volumes:
+      - desktop-data:/root
+    restart: unless-stopped
+    shm_size: '2gb'
+
+volumes:
+  desktop-data:

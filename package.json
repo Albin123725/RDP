@@ -1,0 +1,15 @@
+{
+  "name": "ubuntu-novnc-desktop",
+  "version": "1.0.0",
+  "description": "24/7 Ubuntu Desktop Environment via noVNC for Render deployment",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": ["novnc", "ubuntu", "desktop", "vnc", "render"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2"
+  }
+}

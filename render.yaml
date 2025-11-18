@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: ubuntu-novnc-desktop
+    runtime: docker
+    plan: standard
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    envVars:
+      - key: VNC_PASSWORD
+        generateValue: true
+      - key: VNC_RESOLUTION
+        value: 1920x1080
+      - key: VNC_COL_DEPTH
+        value: "24"
+    autoDeploy: true

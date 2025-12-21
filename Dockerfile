@@ -8,7 +8,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     RESOLUTION=1360x768x24 \
     VNC_PASSWORD=Albin4242
 
-# Install dependencies
+# Install all dependencies including vncserver
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     sudo \
@@ -29,16 +29,25 @@ RUN apt-get update && \
     nginx \
     dbus-x11 \
     pulseaudio \
+    tightvncserver \
+    tightvncpasswd \
     tigervnc-standalone-server \
     tigervnc-common \
     tigervnc-xorg-extension \
+    tigervnc-viewer \
     fonts-wqy-zenhei \
     xfonts-base \
     xfonts-terminus \
     htop \
     nano \
-    vim && \
-    apt-get clean && \
+    vim \
+    x11-utils \
+    x11-xserver-utils \
+    xinit \
+    xserver-xorg-core \
+    xserver-xorg-video-dummy \
+    xterm \
+    && apt-get clean && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 # Create non-root user
@@ -61,10 +70,22 @@ RUN wget -q https://github.com/novnc/websockify/archive/refs/tags/v0.11.0.tar.gz
     mv /usr/share/novnc/utils/websockify-0.11.0 /usr/share/novnc/utils/websockify && \
     rm /tmp/websockify.tar.gz
 
-# Set up VNC password
-RUN echo "$VNC_PASSWORD" | vncpasswd -f > /home/appuser/.vnc/passwd && \
+# Set up VNC password using x11vnc (which is already installed)
+RUN mkdir -p /home/appuser/.vnc && \
+    echo "$VNC_PASSWORD" > /tmp/vncpasswd_input && \
+    x11vnc -storepasswd $(cat /tmp/vncpasswd_input) /home/appuser/.vnc/passwd && \
+    rm /tmp/vncpasswd_input && \
     chmod 600 /home/appuser/.vnc/passwd && \
     chown appuser:appuser /home/appuser/.vnc/passwd
+
+# Alternative: Create password file manually (simpler)
+RUN mkdir -p /home/appuser/.vnc && \
+    echo -e "#!/bin/sh\nunset SESSION_MANAGER\nunset DBUS_SESSION_BUS_ADDRESS\nexec /usr/bin/startxfce4" > /home/appuser/.vnc/xstartup && \
+    chmod +x /home/appuser/.vnc/xstartup && \
+    echo "$VNC_PASSWORD" | vncpasswd -f > /home/appuser/.vnc/passwd 2>/dev/null || \
+    echo "$VNC_PASSWORD" > /home/appuser/.vnc/passwd && \
+    chmod 600 /home/appuser/.vnc/passwd && \
+    chown -R appuser:appuser /home/appuser/.vnc
 
 # Create xstartup script for VNC
 RUN echo '#!/bin/bash\n\
@@ -72,7 +93,7 @@ unset SESSION_MANAGER\n\
 unset DBUS_SESSION_BUS_ADDRESS\n\
 export PULSE_SERVER=tcp:localhost:4713\n\
 export DISPLAY=:1\n\
-startxfce4 &\n\
+/usr/bin/startxfce4 &\n\
 ' > /home/appuser/.vnc/xstartup && \
     chmod +x /home/appuser/.vnc/xstartup && \
     chown -R appuser:appuser /home/appuser/.vnc
@@ -82,9 +103,21 @@ COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 COPY nginx.conf /etc/nginx/sites-available/default
 COPY start.sh /start.sh
 
-# Set up xfce4 configuration
-COPY xfce4-desktop.xml /home/appuser/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml
-RUN chown -R appuser:appuser /home/appuser/.config
+# Create xfce4 configuration directory if needed
+RUN mkdir -p /home/appuser/.config/xfce4/xfconf/xfce-perchannel-xml && \
+    echo '<?xml version="1.0" encoding="UTF-8"?>\n\
+<channel name="xfce4-desktop" version="1.0">\n\
+  <property name="backdrop" type="empty">\n\
+    <property name="screen0" type="empty">\n\
+      <property name="monitor0" type="empty">\n\
+        <property name="workspace0" type="empty">\n\
+          <property name="last-image" type="string" value="/usr/share/backgrounds/xfce/xfce-verticals.png"/>\n\
+        </property>\n\
+      </property>\n\
+    </property>\n\
+  </property>\n\
+</channel>' > /home/appuser/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml && \
+    chown -R appuser:appuser /home/appuser/.config
 
 # Create directory for X11
 RUN mkdir -p /tmp/.X11-unix && \

@@ -1,9 +1,15 @@
 #!/bin/bash
 
-# Set environment for browsers
+# Set environment for browsers and locale
 export DISPLAY=:1
+export LANG=en_US.UTF-8
+export LANGUAGE=en_US:en
+export LC_ALL=en_US.UTF-8
 export CHROMIUM_FLAGS="--no-sandbox --disable-dev-shm-usage"
 export MOZ_DISABLE_CONTENT_SANDBOX=1
+
+# Set keyboard layout to US English
+setxkbmap us
 
 # Prepare directories
 mkdir -p /tmp/.X11-unix
@@ -36,7 +42,7 @@ echo ""
 echo "🖥️  Desktop includes:"
 echo "   • Chromium Browser"
 echo "   • Firefox Browser"
-echo "   • XFCE Desktop"
+echo "   • XFCE Desktop (English/US)"
 echo "=========================================="
 
 # Keep container running

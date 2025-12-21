@@ -1,19 +1,33 @@
-FROM debian
-RUN dpkg --add-architecture i386
-RUN apt update
-RUN DEBIAN_FRONTEND=noninteractive apt install wine qemu-kvm *zenhei* xz-utils dbus-x11 curl firefox-esr gnome-system-monitor mate-system-monitor  git xfce4 xfce4-terminal tightvncserver wget   -y
-RUN wget https://github.com/novnc/noVNC/archive/refs/tags/v1.2.0.tar.gz
-RUN tar -xvf v1.2.0.tar.gz
-RUN mkdir  $HOME/.vnc
-RUN echo 'Albin4242' | vncpasswd -f > $HOME/.vnc/passwd
-RUN echo '/bin/env  MOZ_FAKE_NO_SANDBOX=1  dbus-launch xfce4-session'  > $HOME/.vnc/xstartup
-RUN chmod 600 $HOME/.vnc/passwd
-RUN chmod 755 $HOME/.vnc/xstartup
-RUN echo 'whoami ' >>/luo.sh
-RUN echo 'cd ' >>/luo.sh
-RUN echo "su -l -c 'vncserver :2000 -geometry 1360x768' "  >>/luo.sh
-RUN echo 'cd /noVNC-1.2.0' >>/luo.sh
-RUN echo './utils/launch.sh  --vnc localhost:7900 --listen 8900 ' >>/luo.sh
-RUN chmod 755 /luo.sh
+FROM debian:bullseye-slim
+
+RUN apt-get update && \
+    apt-get install -y \
+    xfce4 xfce4-goodies xfce4-terminal \
+    chromium chromium-sandbox \
+    firefox-esr \
+    wget curl \
+    tightvncserver novnc websockify \
+    dbus-x11 x11-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set up VNC
+RUN mkdir -p /root/.vnc && \
+    echo 'Albin4242' | vncpasswd -f > /root/.vnc/passwd && \
+    chmod 600 /root/.vnc/passwd
+
+# Create xstartup for XFCE
+RUN echo '#!/bin/bash' > /root/.vnc/xstartup && \
+    echo 'unset SESSION_MANAGER' >> /root/.vnc/xstartup && \
+    echo 'unset DBUS_SESSION_BUS_ADDRESS' >> /root/.vnc/xstartup && \
+    echo 'export DISPLAY=:1' >> /root/.vnc/xstartup && \
+    echo 'export CHROMIUM_FLAGS="--no-sandbox --disable-dev-shm-usage"' >> /root/.vnc/xstartup && \
+    echo 'startxfce4 &' >> /root/.vnc/xstartup && \
+    chmod 755 /root/.vnc/xstartup
+
+# Copy start.sh script
+COPY start.sh /start.sh
+RUN chmod +x /start.sh
+
 EXPOSE 8900
-CMD  /luo.sh
+
+CMD ["/start.sh"]

@@ -1,36 +1,27 @@
 #!/bin/bash
 
 # Set environment
-export USER=root
-export HOME=/root
 export DISPLAY=:99
-export LANG=en_US.UTF-8
-export LC_ALL=en_US.UTF-8
+export LANG=C.UTF-8
 export CHROMIUM_FLAGS="--no-sandbox --disable-dev-shm-usage"
 export MOZ_DISABLE_CONTENT_SANDBOX=1
 
 # Create necessary directories
 mkdir -p /tmp/.X11-unix
 chmod 1777 /tmp/.X11-unix
-mkdir -p /var/run/dbus
 
-# Start DBus
-echo "Starting DBus..."
-dbus-daemon --system --fork
-sleep 2
+echo "=== Starting VNC Desktop ==="
 
-# Start Xvfb (virtual framebuffer)
-echo "Starting Xvfb on display :99..."
+# Method 1: Simple Xvfb + x11vnc + Firefox (most reliable)
+echo "1. Starting Xvfb..."
 Xvfb :99 -screen 0 1360x768x24 -ac +extension GLX +render -noreset &
 sleep 3
 
-# Start x11vnc (VNC server)
-echo "Starting x11vnc on port 5900..."
-x11vnc -display :99 -forever -shared -nopw -listen 0.0.0.0 -xkb -bg &
+echo "2. Starting x11vnc..."
+x11vnc -display :99 -forever -shared -nopw -listen 0.0.0.0 -bg
 sleep 2
 
-# Start XFCE desktop
-echo "Starting XFCE desktop..."
+echo "3. Starting XFCE..."
 startxfce4 &
 sleep 5
 
@@ -38,74 +29,49 @@ sleep 5
 mkdir -p /root/Desktop
 
 # Chromium shortcut
-cat > /root/Desktop/chromium.desktop << 'EOF'
+cat > /root/Desktop/chromium.desktop << EOF
 [Desktop Entry]
 Version=1.0
 Name=Chromium Browser
-Comment=Browse the web
-Exec=chromium --no-sandbox --disable-dev-shm-usage --start-maximized
+Comment=Web Browser
+Exec=chromium --no-sandbox --disable-dev-shm-usage
 Icon=chromium
 Terminal=false
 Type=Application
-Categories=Network;WebBrowser;
 EOF
 
-# Firefox shortcut
-cat > /root/Desktop/firefox.desktop << 'EOF'
+# Firefox shortcut  
+cat > /root/Desktop/firefox.desktop << EOF
 [Desktop Entry]
 Version=1.0
 Name=Firefox Browser
-Comment=Browse the web
+Comment=Web Browser
 Exec=firefox-esr
 Icon=firefox-esr
 Terminal=false
 Type=Application
-Categories=Network;WebBrowser;
-EOF
-
-# Terminal shortcut
-cat > /root/Desktop/terminal.desktop << 'EOF'
-[Desktop Entry]
-Version=1.0
-Name=Terminal
-Comment=Command line terminal
-Exec=xfce4-terminal
-Icon=utilities-terminal
-Terminal=false
-Type=Application
-Categories=System;TerminalEmulator;
 EOF
 
 chmod +x /root/Desktop/*.desktop
 
-# Start noVNC web interface
-echo "Starting noVNC web interface on port 8900..."
-websockify --web=/usr/share/novnc 0.0.0.0:8900 localhost:5900 &
-
-# Display connection info
-echo ""
+echo "4. Starting noVNC web interface..."
+# Start noVNC - THIS MUST BE THE LAST COMMAND (foreground process)
 echo "=========================================="
-echo "   🚀 VNC Desktop is Ready!"
+echo "✅ VNC Desktop is READY!"
 echo "=========================================="
 echo ""
 echo "🌐 Access URL:"
-echo "   https://$(hostname):8900/vnc.html"
+echo "   https://$(hostname):8080/vnc.html"
 echo ""
-echo "📋 Alternative URL:"
-echo "   https://$(hostname):8900"
+echo "🔑 No password required"
 echo ""
-echo "🖥️  Desktop includes:"
-echo "   • Chromium Browser"
-echo "   • Firefox Browser" 
-echo "   • Terminal"
+echo "🖥️  Features:"
+echo "   • Firefox Browser"
+echo "   • Chromium Browser"  
 echo "   • XFCE Desktop"
-echo ""
-echo "🔧 Server Status:"
-echo "   Xvfb: display :99"
-echo "   x11vnc: port 5900"
-echo "   noVNC: port 8900"
 echo "=========================================="
 echo ""
+echo "Starting noVNC on port 8080..."
 
-# Keep container running
-tail -f /dev/null
+# Start noVNC in foreground (important for Render)
+websockify --web=/usr/share/novnc 0.0.0.0:8080 localhost:5900

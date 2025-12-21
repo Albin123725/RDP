@@ -1,56 +1,35 @@
 FROM debian:bullseye-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
-ENV LANG=C.UTF-8
-ENV LC_ALL=C.UTF-8
-ENV USER=root
-ENV HOME=/root
-ENV DISPLAY=:99
 
-# Install all required packages including locales
 RUN apt-get update && \
     apt-get install -y \
-    locales \
-    xfce4 xfce4-goodies xfce4-terminal \
-    chromium chromium-sandbox \
     firefox-esr \
-    wget curl \
-    tightvncserver novnc websockify \
-    dbus-x11 x11-utils \
+    novnc websockify \
     xvfb x11vnc \
-    netcat-openbsd \
-    xfonts-base xfonts-100dpi xfonts-75dpi xfonts-cyrillic \
+    fluxbox \
+    xterm \
     && rm -rf /var/lib/apt/lists/*
 
-# Generate locales
-RUN echo "en_US.UTF-8 UTF-8" > /etc/locale.gen && \
-    locale-gen en_US.UTF-8 && \
-    update-locale LANG=en_US.UTF-8
+# Create startup script directly
+RUN echo '#!/bin/bash' > /start.sh && \
+    echo 'echo "Starting Xvfb..."' >> /start.sh && \
+    echo 'Xvfb :99 -screen 0 1360x768x24 &' >> /start.sh && \
+    echo 'sleep 2' >> /start.sh && \
+    echo '' >> /start.sh && \
+    echo 'echo "Starting x11vnc..."' >> /start.sh && \
+    echo 'x11vnc -display :99 -forever -shared -nopw -listen 0.0.0.0 &' >> /start.sh && \
+    echo 'sleep 2' >> /start.sh && \
+    echo '' >> /start.sh && \
+    echo 'echo "Starting Firefox..."' >> /start.sh && \
+    echo 'DISPLAY=:99 firefox-esr &' >> /start.sh && \
+    echo 'sleep 3' >> /start.sh && \
+    echo '' >> /start.sh && \
+    echo 'echo "Starting noVNC..."' >> /start.sh && \
+    echo 'echo "Access: https://\$(hostname):8080/vnc.html"' >> /start.sh && \
+    echo 'websockify --web=/usr/share/novnc 0.0.0.0:8080 localhost:5900' >> /start.sh && \
+    chmod +x /start.sh
 
-# Set up VNC
-RUN mkdir -p /root/.vnc && \
-    echo 'Albin4242' | vncpasswd -f > /root/.vnc/passwd && \
-    chmod 600 /root/.vnc/passwd
-
-# Create simple xstartup
-RUN echo '#!/bin/bash' > /root/.vnc/xstartup && \
-    echo 'unset SESSION_MANAGER' >> /root/.vnc/xstartup && \
-    echo 'unset DBUS_SESSION_BUS_ADDRESS' >> /root/.vnc/xstartup && \
-    echo 'xrdb $HOME/.Xresources' >> /root/.vnc/xstartup && \
-    echo 'startxfce4 &' >> /root/.vnc/xstartup && \
-    chmod 755 /root/.vnc/xstartup
-
-# Create .Xresources
-RUN echo 'Xft.dpi: 96' > /root/.Xresources && \
-    echo 'Xft.antialias: true' >> /root/.Xresources && \
-    echo 'Xft.hinting: true' >> /root/.Xresources && \
-    echo 'Xft.rgba: rgb' >> /root/.Xresources && \
-    echo 'Xft.hintstyle: hintslight' >> /root/.Xresources
-
-# Create startup script
-COPY start.sh /start.sh
-RUN chmod +x /start.sh
-
-EXPOSE 8900
+EXPOSE 8080
 
 CMD ["/start.sh"]

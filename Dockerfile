@@ -1,14 +1,16 @@
 FROM debian:bullseye-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
-ENV LANG=en_US.UTF-8
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
 ENV USER=root
 ENV HOME=/root
-ENV DISPLAY=:1
+ENV DISPLAY=:99
 
-# Install all required packages
+# Install all required packages including locales
 RUN apt-get update && \
     apt-get install -y \
+    locales \
     xfce4 xfce4-goodies xfce4-terminal \
     chromium chromium-sandbox \
     firefox-esr \
@@ -22,7 +24,8 @@ RUN apt-get update && \
 
 # Generate locales
 RUN echo "en_US.UTF-8 UTF-8" > /etc/locale.gen && \
-    locale-gen en_US.UTF-8
+    locale-gen en_US.UTF-8 && \
+    update-locale LANG=en_US.UTF-8
 
 # Set up VNC
 RUN mkdir -p /root/.vnc && \

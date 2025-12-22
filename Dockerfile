@@ -53,7 +53,8 @@ unset DBUS_SESSION_BUS_ADDRESS
 [ -x /etc/vnc/xstartup ] && exec /etc/vnc/xstartup
 [ -r $HOME/.Xresources ] && xrdb $HOME/.Xresources
 xsetroot -solid grey
-vncconfig -iconic &
+# IMPORTANT: vncconfig must run with -nowin and -poll to enable clipboard
+vncconfig -nowin -poll 250 &
 # Disable composite manager to save memory
 xfwm4 --compositor=off &
 # Start with minimal Xfce components
@@ -74,33 +75,43 @@ RUN wget -q https://github.com/novnc/noVNC/archive/refs/tags/v1.4.0.tar.gz -O /t
     mv /opt/novnc/utils/websockify-0.11.0 /opt/novnc/utils/websockify && \
     rm /tmp/websockify.tar.gz
 
-# Install clipboard utilities - use Diodon (Ubuntu's replacement) and autocutsel
+# Install working clipboard utilities
 RUN apt update && apt install -y \
     xclip \
     autocutsel \
-    diodon \
     && apt clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Modify xstartup to enable clipboard with Diodon
+# Create a startup script that properly enables clipboard
+RUN cat > /start-clipboard.sh << 'EOF'
+#!/bin/bash
+# Wait for X to be ready
+sleep 3
+
+# Start autocutsel for CLIPBOARD synchronization (Ctrl+C/Ctrl+V)
+autocutsel -fork &
+
+# Start autocutsel for PRIMARY synchronization (middle-click)
+autocutsel -selection PRIMARY -fork &
+
+# Also sync from CLIPBOARD to PRIMARY and vice versa
+autocutsel -s CLIPBOARD -fork &
+autocutsel -s PRIMARY -fork &
+
+echo "Clipboard synchronization started"
+echo "You can now copy-paste between local machine and VNC"
+echo "Local -> VNC: Copy with Ctrl+C, paste in VNC with Ctrl+V"
+echo "VNC -> Local: Copy in VNC with Ctrl+C, paste locally with Ctrl+V"
+EOF
+
+RUN chmod +x /start-clipboard.sh
+
+# Modify xstartup to enable proper clipboard support
 RUN cat >> /root/.vnc/xstartup << 'EOF'
 
-# Start Diodon clipboard manager (Ubuntu's replacement for Clipit)
-diodon &
-# Start autocutsel for VNC clipboard synchronization
-autocutsel -fork &
-autocutsel -selection PRIMARY -fork &
+# Start clipboard synchronization
+/start-clipboard.sh &
 EOF
-
-# Also create a simple clipboard test script to verify functionality
-RUN cat > /test-clipboard.sh << 'EOF'
-#!/bin/bash
-echo "Clipboard test: If you see this text, clipboard is working"
-echo "Copy this text and try to paste it in your local machine or VNC"
-echo "Test completed at $(date)"
-EOF
-
-RUN chmod +x /test-clipboard.sh
 
 # Create cleanup script for periodic memory management
 RUN cat > /cleanup.sh << 'EOF'
@@ -131,16 +142,17 @@ CMD echo "Starting VNC server..." && \
     # Start VNC server without the problematic -fp option
     vncserver :1 -geometry ${VNC_RESOLUTION} -depth ${VNC_DEPTH} && \
     echo "VNC started successfully on display :1" && \
-    echo "Starting Diodon clipboard manager..." && \
-    # Wait a bit for X to start, then run diodon
-    sleep 3 && \
-    diodon & \
-    echo "Starting autocutsel for clipboard sync..." && \
-    autocutsel -fork & \
-    autocutsel -selection PRIMARY -fork & \
+    echo "Starting clipboard synchronization..." && \
+    /start-clipboard.sh & \
     echo "Starting noVNC proxy..." && \
     # Start noVNC proxy
     /opt/novnc/utils/novnc_proxy --vnc localhost:5901 --listen 0.0.0.0:10000 --heartbeat 30 --web /opt/novnc && \
     echo "noVNC started on port 10000" && \
-    echo "Clipboard test: Run /test-clipboard.sh to verify functionality" && \
+    echo "=========================================" && \
+    echo "CLIPBOARD TEST INSTRUCTIONS:" && \
+    echo "1. On your LOCAL machine: Copy some text (Ctrl+C)" && \
+    echo "2. In VNC: Click in a text field and paste (Ctrl+V)" && \
+    echo "3. In VNC: Copy some text (Ctrl+C)" && \
+    echo "4. On LOCAL machine: Paste (Ctrl+V)" && \
+    echo "=========================================" && \
     tail -f /dev/null

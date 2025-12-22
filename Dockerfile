@@ -74,17 +74,21 @@ RUN wget -q https://github.com/novnc/noVNC/archive/refs/tags/v1.4.0.tar.gz -O /t
     mv /opt/novnc/utils/websockify-0.11.0 /opt/novnc/utils/websockify && \
     rm /tmp/websockify.tar.gz
 
-# Install clipboard utilities and enable copy-paste support
+# Install clipboard utilities for copy-paste with GUI tools
 RUN apt update && apt install -y \
-    autocutsel \
     xclip \
+    clipit \
+    parcellite \
+    autocutsel \
     && apt clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Modify xstartup to enable clipboard synchronization
+# Modify xstartup to enable clipboard with GUI icon
 RUN cat >> /root/.vnc/xstartup << 'EOF'
 
-# Start clipboard synchronization for local<->remote copy-paste
+# Start clipboard manager with icon for copy-paste between local and VNC
+clipit &
+# Also start autocutsel for full clipboard synchronization
 autocutsel -fork &
 autocutsel -selection PRIMARY -fork &
 EOF

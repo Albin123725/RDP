@@ -1,14 +1,10 @@
 FROM ubuntu:22.04
 
-# Environment variables
-ENV DEBIAN_FRONTEND=noninteractive
-ENV DISPLAY=:1
-ENV RESOLUTION=1280x720
-ENV VNC_PASSWORD=password123
-ENV PORT=10000
-
-# Install packages
+# Install git and all dependencies first
 RUN apt-get update && apt-get install -y \
+    git \
+    curl \
+    wget \
     xfce4 \
     xfce4-goodies \
     tigervnc-standalone-server \
@@ -16,28 +12,21 @@ RUN apt-get update && apt-get install -y \
     websockify \
     && apt-get clean
 
-# Setup VNC directory and password
-RUN mkdir -p /root/.vnc
-RUN echo "$VNC_PASSWORD" | vncpasswd -f > /root/.vnc/passwd
-RUN chmod 600 /root/.vnc/passwd
+# Setup VNC
+RUN mkdir -p /root/.vnc && \
+    echo "password123" | vncpasswd -f > /root/.vnc/passwd && \
+    chmod 600 /root/.vnc/passwd
 
-# Create xstartup file correctly
-RUN echo '#!/bin/bash' > /root/.vnc/xstartup && \
-    echo 'unset SESSION_MANAGER' >> /root/.vnc/xstartup && \
-    echo 'unset DBUS_SESSION_BUS_ADDRESS' >> /root/.vnc/xstartup && \
-    echo 'exec startxfce4' >> /root/.vnc/xstartup && \
+# Create xstartup
+RUN echo 'startxfce4' > /root/.vnc/xstartup && \
     chmod +x /root/.vnc/xstartup
 
-# Setup noVNC
+# Clone noVNC (git is now installed)
 RUN git clone https://github.com/novnc/noVNC.git /opt/novnc
-RUN ln -s /opt/novnc/vnc.html /opt/novnc/index.html
-
-# Copy start script
-COPY start.sh /start.sh
-RUN chmod +x /start.sh
-
-# Expose Render's port
-EXPOSE 10000
 
 # Start command
-CMD ["/start.sh"]
+CMD vncserver :1 -geometry 1280x720 -localhost no && \
+    /opt/novnc/utils/novnc_proxy --vnc localhost:5901 --listen 0.0.0.0:10000 --web /opt/novnc && \
+    tail -f /dev/null
+
+EXPOSE 10000

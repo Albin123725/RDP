@@ -1,56 +1,18 @@
+version: 1
 services:
   - type: web
-    name: xfce-vnc-desktop
-    env: docker
+    name: xfce-desktop
+    runtime: docker
+    plan: free
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    plan: free
-    region: oregon  # or: frankfurt, singapore, ohio
-    
-    # CRITICAL: Render routes external traffic through port 10000
-    # Internal container ports should map to 10000
-    dockerCommand: >
-      /bin/bash -c "
-      vncserver :1 -geometry 1280x720 -localhost no -SecurityTypes VncAuth && \
-      /opt/novnc/utils/novnc_proxy --vnc localhost:5901 --listen 0.0.0.0:10000
-      "
-    
-    # Health check for Render's monitoring
-    healthCheckPath: /
-    healthCheckTimeout: 30
-    
-    # Auto-deploy settings
     autoDeploy: true
-    branch: main
-    
-    # Environment variables
     envVars:
       - key: VNC_PASSWORD
-        generateValue: true  # Render will generate a secure password
+        generateValue: true
       - key: RESOLUTION
         value: 1280x720
       - key: DISPLAY
         value: ":1"
-      - key: RENDER
-        value: "true"
-      - key: RENDER_PORT
-        value: "10000"  # Render's internal proxy port
-
-    # Port configuration - THIS IS THE KEY FIX
-    # Render web services must listen on port 10000 internally
-    # OR use port 80/443 and let Render proxy to it
-    ports:
-      - port: 10000
-        protocol: TCP
-
-    # Optional: For VNC direct access (if you want to keep port 5901)
-    # Requires Render Pro plan for multiple ports
-    # - port: 5901
-    #   protocol: TCP
-
-    # Resource limits for free tier
-    numInstances: 1
-    disk:
-      name: xfce-data
-      mountPath: /data
-      sizeGB: 1
+    healthCheckPath: /
+    healthCheckTimeout: 30

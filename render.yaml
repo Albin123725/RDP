@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: vnc-desktop
+    env: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    envVars:
+      - key: DISPLAY
+        value: :99
+      - key: PULSE_SERVER
+        value: /tmp/pulse.sock
+    autoDeploy: true
+    port: 8900
+    healthCheckPath: /
+    numInstances: 1

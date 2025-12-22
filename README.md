@@ -1,61 +1,47 @@
-# VNC Desktop for Render
+# XFCE VNC Desktop for Render
 
-A Dockerized VNC desktop environment with XFCE4 that can be deployed on Render.
+A lightweight, optimized XFCE desktop environment running on Render.com with VNC access.
 
 ## Features
-- XFCE4 Desktop Environment
-- VNC Access via Browser
-- Firefox Browser
-- Terminal Access
-- Supervisord for process management
-- Nginx reverse proxy
+- XFCE 4.16 Desktop Environment
+- TigerVNC Server
+- noVNC Web Access
+- Pre-installed applications (Firefox, Terminal, File Manager)
+- Optimized for Render's free tier
 
-## Deployment on Render
+## Deployment
 
-1. **Create a new repository** with all these files
-2. **Go to [Render Dashboard](https://dashboard.render.com)**
-3. Click **"New +"** → **"Web Service"**
-4. Connect your GitHub/GitLab repository
-5. Configure:
-   - **Name:** vnc-desktop
-   - **Environment:** Docker
-   - **Plan:** Free
-6. Click **"Create Web Service"**
+### Option 1: Deploy to Render
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy)
+
+### Option 2: Manual Setup
+1. Fork this repository
+2. Create a new Web Service on Render
+3. Connect your GitHub repository
+4. Set build command: `docker build -t xfce-vnc .`
+5. Set start command: `docker run -p 5901:5901 -p 6080:6080 xfce-vnc`
+6. Add environment variables (optional):
+   - `VNC_PASSWORD`: Your VNC password
+   - `RESOLUTION`: Desktop resolution (default: 1920x1080)
 
 ## Access
 
-Once deployed:
-1. Go to your Render service URL
-2. Click "Connect" in the noVNC interface
-3. Enter password: `Albin4242`
-4. Enjoy your desktop!
+### Via VNC Client
+- Host: `your-service.onrender.com`
+- Port: `5901`
+- Password: Set via VNC_PASSWORD environment variable
 
-## Environment Variables
+### Via Web Browser (noVNC)
+- URL: `https://your-service.onrender.com:6080/vnc.html`
+- Password: Same as VNC password
 
-You can customize these in Render dashboard:
-- `VNC_PASSWORD`: VNC access password (default: Albin4242)
-- `RESOLUTION`: Screen resolution (default: 1360x768x24)
-- `WEB_PORT`: Web interface port (default: 8080)
+## Customization
+Edit the `Dockerfile` to:
+- Add more applications
+- Change desktop theme
+- Modify startup applications
 
-## Files Description
-
-- `Dockerfile`: Main container definition
-- `start.sh`: Startup script
-- `supervisord.conf`: Process manager configuration
-- `nginx.conf`: Web server configuration
-- `render.yaml`: Render deployment configuration
-- `xfce4-desktop.xml`: XFCE desktop customization (optional)
-
-## Security Notes
-
-1. The VNC password is set to "Albin4242" by default
-2. Consider changing the password before production use
-3. Free tier on Render sleeps after inactivity
-4. Data is not persistent (container is ephemeral)
-
-## Troubleshooting
-
-1. **Service won't start**: Check Render logs for errors
-2. **Can't connect via VNC**: Wait 2-3 minutes for full startup
-3. **Black screen**: Refresh the browser page
-4. **High memory usage**: Free tier has 512MB RAM limit
+## Notes
+- Render free tier has limitations (sleeps after inactivity)
+- Use Basic or higher plans for always-on service
+- VNC over public internet should use strong passwords

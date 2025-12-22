@@ -187,6 +187,7 @@ Icon=edit-paste
 Terminal=true
 Type=Application
 EOF
+RUN mkdir -p /root/.local/share/applications
 
 RUN cat > /root/Desktop/Terminal.desktop << 'EOF'
 [Desktop Entry]

@@ -1,43 +1,30 @@
-FROM ubuntu:20.04
+FROM ubuntu:22.04
 
+# Use Render's PORT environment variable
+ARG RENDER_PORT=10000
+ENV RENDER_EXTERNAL_PORT=${RENDER_PORT}
 ENV DEBIAN_FRONTEND=noninteractive
-ENV TZ=UTC
-ENV VNC_PASSWORD=vncpassword
+ENV DISPLAY=:1
 ENV RESOLUTION=1280x720
+ENV VNC_PASSWORD=vncpassword
+ENV PORT=10000  # Critical: Match Render's internal port
 
-# Install packages with proper ordering
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-    software-properties-common \
-    && add-apt-repository ppa:mozillateam/ppa \
-    && apt-get update && \
-    apt-get install -y --no-install-recommends \
-    xfce4 \
-    xfce4-goodies \
-    tightvncserver \
-    wget \
-    curl \
-    net-tools \
-    python3 \
-    python3-numpy \
-    websockify \
+# Install
+RUN apt-get update && apt-get install -y \
+    xfce4 xfce4-goodies \
+    tigervnc-standalone-server \
+    novnc websockify \
     supervisor \
-    firefox \
-    xfce4-terminal \
-    thunar \
-    htop \
-    nano \
-    git \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+    curl wget \
+    && rm -rf /var/lib/apt/lists/*
 
-# Create VNC directory and password
+# Setup VNC
 RUN mkdir -p /root/.vnc && \
-    echo "$VNC_PASSWORD" | vncpasswd -f > /root/.vnc/passwd && \
+    echo "${VNC_PASSWORD}" | vncpasswd -f > /root/.vnc/passwd && \
     chmod 600 /root/.vnc/passwd
 
-# Create xstartup file
-RUN echo '#!/bin/bash\n\
+# Create xstartup
+RUN echo '#!/bin/sh\n\
 unset SESSION_MANAGER\n\
 unset DBUS_SESSION_BUS_ADDRESS\n\
 exec startxfce4' > /root/.vnc/xstartup && \
@@ -48,10 +35,15 @@ RUN git clone https://github.com/novnc/noVNC.git /opt/novnc && \
     git clone https://github.com/novnc/websockify /opt/novnc/utils/websockify && \
     ln -s /opt/novnc/vnc.html /opt/novnc/index.html
 
-# Copy startup script
-COPY start.sh /start.sh
-RUN chmod +x /start.sh
+# Create startup script for Render
+COPY start-render.sh /start-render.sh
+RUN chmod +x /start-render.sh
 
-EXPOSE 5901 6080 8080
+# Create health check endpoint
+RUN mkdir -p /opt/novnc/health && \
+    echo "OK" > /opt/novnc/health/index.html
 
-CMD ["/start.sh"]
+# Expose the Render port
+EXPOSE ${PORT}
+
+CMD ["/start-render.sh"]

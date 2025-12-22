@@ -30,8 +30,10 @@ RUN apt update && apt install -y \
     xfonts-base \
     xfonts-100dpi \
     xfonts-75dpi \
-    # Add Epiphany (GNOME Web) lightweight browser instead of Midori
+    # Add Epiphany (GNOME Web) lightweight browser
     epiphany-browser \
+    # Add xdg-utils for proper browser integration
+    xdg-utils \
     --no-install-recommends && \
     apt clean && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* && \
@@ -49,6 +51,26 @@ RUN mkdir -p /root/.vnc && \
     printf "${VNC_PASSWD}\n${VNC_PASSWD}\nn\n" | vncpasswd && \
     chmod 600 /root/.vnc/passwd
 
+# Configure default web browser and fix desktop integration
+RUN update-alternatives --set x-www-browser /usr/bin/epiphany-browser && \
+    update-alternatives --set gnome-www-browser /usr/bin/epiphany-browser && \
+    # Create proper desktop file for Epiphany
+    echo "[Desktop Entry]" > /usr/share/applications/epiphany.desktop && \
+    echo "Name=Epiphany Web Browser" >> /usr/share/applications/epiphany.desktop && \
+    echo "GenericName=Web Browser" >> /usr/share/applications/epiphany.desktop && \
+    echo "Comment=Browse the Web" >> /usr/share/applications/epiphany.desktop && \
+    echo "Exec=epiphany-browser %U" >> /usr/share/applications/epiphany.desktop && \
+    echo "Icon=epiphany" >> /usr/share/applications/epiphany.desktop && \
+    echo "Terminal=false" >> /usr/share/applications/epiphany.desktop && \
+    echo "Type=Application" >> /usr/share/applications/epiphany.desktop && \
+    echo "Categories=Network;WebBrowser;" >> /usr/share/applications/epiphany.desktop && \
+    echo "MimeType=text/html;text/xml;application/xhtml+xml;application/xml;application/vnd.mozilla.xul+xml;application/rss+xml;application/rdf+xml;image/gif;image/jpeg;image/png;x-scheme-handler/http;x-scheme-handler/https;x-scheme-handler/ftp;x-scheme-handler/chrome;video/webm;application/x-xpinstall;" >> /usr/share/applications/epiphany.desktop && \
+    echo "StartupNotify=true" >> /usr/share/applications/epiphany.desktop && \
+    # Also create a simpler default browser configuration
+    echo "#!/bin/sh" > /usr/local/bin/default-browser && \
+    echo "exec epiphany-browser \"\$@\"" >> /usr/local/bin/default-browser && \
+    chmod +x /usr/local/bin/default-browser
+
 # Create optimized xstartup with memory-saving options
 RUN cat > /root/.vnc/xstartup << 'EOF'
 #!/bin/bash
@@ -64,6 +86,9 @@ xfwm4 --compositor=off &
 xfsettingsd --daemon
 xfce4-panel &
 xfdesktop &
+# Set some environment variables for proper browser operation
+export GDK_BACKEND=x11
+export NO_AT_BRIDGE=1
 EOF
 
 RUN chmod +x /root/.vnc/xstartup
@@ -87,16 +112,25 @@ while true; do
     find /var/tmp -type f -atime +1 -delete 2>/dev/null || true
     # Kill any zombie processes
     ps aux | grep "defunct" | grep -v grep | awk "{print \$2}" | xargs -r kill -9 2>/dev/null || true
-    # Kill Epiphany if it's using too much memory (optional safety measure)
-    # Uncomment below if browser causes memory issues
-    # if [ $(ps aux | grep epiphany | grep -v grep | wc -l) -gt 0 ]; then
-    #     ps aux --sort=-%mem | grep epiphany | grep -v grep | head -1 | awk '{if($4 > 50) print $2}' | xargs -r kill -9 2>/dev/null || true
-    # fi
     sleep 300
 done
 EOF
 
 RUN chmod +x /cleanup.sh
+
+# Create a simple test script to verify browser works
+RUN cat > /test-browser.sh << 'EOF'
+#!/bin/bash
+# Test if browser can open a simple page
+timeout 10 epiphany-browser --version
+if [ $? -eq 0 ]; then
+    echo "Browser test passed: Epiphany is working"
+else
+    echo "Browser test failed: Epiphany may have issues"
+fi
+EOF
+
+RUN chmod +x /test-browser.sh
 
 # Copy noVNC HTML files to serve as health check endpoint
 RUN cp /opt/novnc/vnc_lite.html /opt/novnc/index.html
@@ -112,6 +146,8 @@ CMD echo "Starting VNC server..." && \
     # Start VNC server without the problematic -fp option
     vncserver :1 -geometry ${VNC_RESOLUTION} -depth ${VNC_DEPTH} && \
     echo "VNC started successfully on display :1" && \
+    echo "Testing browser..." && \
+    /test-browser.sh && \
     echo "Starting noVNC proxy..." && \
     # Start noVNC proxy
     /opt/novnc/utils/novnc_proxy --vnc localhost:5901 --listen 0.0.0.0:10000 --heartbeat 30 --web /opt/novnc && \

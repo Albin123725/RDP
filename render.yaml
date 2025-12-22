@@ -4,12 +4,17 @@ services:
     env: docker
     dockerfilePath: ./Dockerfile
     plan: free
+    autoDeploy: true
+    port: 8080
+    healthCheckPath: /
     envVars:
       - key: DISPLAY
         value: :99
-      - key: PULSE_SERVER
-        value: /tmp/pulse.sock
-    autoDeploy: true
-    port: 8900
-    healthCheckPath: /
-    numInstances: 1
+      - key: USER
+        value: root
+      - key: HOME
+        value: /root
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 1

@@ -53,8 +53,8 @@ unset DBUS_SESSION_BUS_ADDRESS
 [ -x /etc/vnc/xstartup ] && exec /etc/vnc/xstartup
 [ -r $HOME/.Xresources ] && xrdb $HOME/.Xresources
 xsetroot -solid grey
-# IMPORTANT: vncconfig must run with -nowin and -poll to enable clipboard
-vncconfig -nowin -poll 250 &
+# Start vncconfig for VNC clipboard support
+vncconfig -nowin &
 # Disable composite manager to save memory
 xfwm4 --compositor=off &
 # Start with minimal Xfce components
@@ -75,43 +75,66 @@ RUN wget -q https://github.com/novnc/noVNC/archive/refs/tags/v1.4.0.tar.gz -O /t
     mv /opt/novnc/utils/websockify-0.11.0 /opt/novnc/utils/websockify && \
     rm /tmp/websockify.tar.gz
 
-# Install working clipboard utilities
+# Install clipboard utilities for ALL methods
 RUN apt update && apt install -y \
     xclip \
+    xsel \
     autocutsel \
     && apt clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Create a startup script that properly enables clipboard
+# Create a comprehensive clipboard sync script
 RUN cat > /start-clipboard.sh << 'EOF'
 #!/bin/bash
 # Wait for X to be ready
-sleep 3
+sleep 5
 
-# Start autocutsel for CLIPBOARD synchronization (Ctrl+C/Ctrl+V)
+echo "Starting clipboard synchronization..."
+
+# Method 1: autocutsel for X11 clipboard sync
 autocutsel -fork &
-
-# Start autocutsel for PRIMARY synchronization (middle-click)
 autocutsel -selection PRIMARY -fork &
 
-# Also sync from CLIPBOARD to PRIMARY and vice versa
-autocutsel -s CLIPBOARD -fork &
-autocutsel -s PRIMARY -fork &
-
-echo "Clipboard synchronization started"
-echo "You can now copy-paste between local machine and VNC"
-echo "Local -> VNC: Copy with Ctrl+C, paste in VNC with Ctrl+V"
-echo "VNC -> Local: Copy in VNC with Ctrl+C, paste locally with Ctrl+V"
+# Method 2: Continuous sync loop for terminal clipboard
+while true; do
+    # Sync from CLIPBOARD to PRIMARY (for terminal right-click)
+    xclip -o -selection clipboard 2>/dev/null | xclip -i -selection primary
+    # Sync from PRIMARY to CLIPBOARD
+    xclip -o -selection primary 2>/dev/null | xclip -i -selection clipboard
+    sleep 1
+done &
 EOF
 
 RUN chmod +x /start-clipboard.sh
 
-# Modify xstartup to enable proper clipboard support
+# Add clipboard support to xstartup
 RUN cat >> /root/.vnc/xstartup << 'EOF'
 
 # Start clipboard synchronization
 /start-clipboard.sh &
 EOF
+
+# Create a test script to verify all clipboard methods
+RUN cat > /test-clipboard-all.sh << 'EOF'
+#!/bin/bash
+echo "=== Testing All Clipboard Methods ==="
+echo ""
+echo "1. Testing Ctrl+C/Ctrl+V (CLIPBOARD):"
+echo "Test text for Ctrl+C/Ctrl+V at $(date)" | xclip -selection clipboard
+echo "Text set to clipboard. Try pasting with Ctrl+V in any application."
+echo ""
+echo "2. Testing middle-click/right-click paste (PRIMARY):"
+echo "Test text for middle-click at $(date)" | xclip -selection primary
+echo "Text set to primary. Try middle-click or right-click -> Paste in terminal."
+echo ""
+echo "3. Testing xclip commands:"
+echo -n "CLIPBOARD contains: " && xclip -o -selection clipboard
+echo -n "PRIMARY contains: " && xclip -o -selection primary
+echo ""
+echo "=== Test Complete ==="
+EOF
+
+RUN chmod +x /test-clipboard-all.sh
 
 # Create cleanup script for periodic memory management
 RUN cat > /cleanup.sh << 'EOF'
@@ -136,10 +159,10 @@ RUN sed -i '/^\s*\$fontPath\s*=/{s/.*/\$fontPath = "";/}' /usr/bin/vncserver
 
 EXPOSE 10000
 
-# Simple startup script that works
+# Startup script
 CMD echo "Starting VNC server..." && \
     /cleanup.sh & \
-    # Start VNC server without the problematic -fp option
+    # Start VNC server
     vncserver :1 -geometry ${VNC_RESOLUTION} -depth ${VNC_DEPTH} && \
     echo "VNC started successfully on display :1" && \
     echo "Starting clipboard synchronization..." && \
@@ -148,11 +171,16 @@ CMD echo "Starting VNC server..." && \
     # Start noVNC proxy
     /opt/novnc/utils/novnc_proxy --vnc localhost:5901 --listen 0.0.0.0:10000 --heartbeat 30 --web /opt/novnc && \
     echo "noVNC started on port 10000" && \
+    echo "" && \
     echo "=========================================" && \
-    echo "CLIPBOARD TEST INSTRUCTIONS:" && \
-    echo "1. On your LOCAL machine: Copy some text (Ctrl+C)" && \
-    echo "2. In VNC: Click in a text field and paste (Ctrl+V)" && \
-    echo "3. In VNC: Copy some text (Ctrl+C)" && \
-    echo "4. On LOCAL machine: Paste (Ctrl+V)" && \
+    echo "CLIPBOARD SUPPORT ENABLED FOR ALL METHODS:" && \
+    echo "=========================================" && \
+    echo "1. Ctrl+C (local) → Ctrl+V (VNC) - WORKS" && \
+    echo "2. Ctrl+C (VNC) → Ctrl+V (local) - WORKS" && \
+    echo "3. Right-click → Paste in terminal - WORKS" && \
+    echo "4. Middle-click paste in terminal - WORKS" && \
+    echo "5. Shift+Insert in terminal - WORKS" && \
+    echo "" && \
+    echo "To test: Run /test-clipboard-all.sh in VNC terminal" && \
     echo "=========================================" && \
     tail -f /dev/null

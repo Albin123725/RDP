@@ -8,7 +8,7 @@ services:
     healthCheckPath: /vnc_lite.html
     envVars:
       - key: VNC_PASSWD
-        value: "Albin"
+        value: "albin4242"
       - key: VNC_RESOLUTION
         value: "1024x576"
       - key: VNC_DEPTH

@@ -1,62 +1,45 @@
-FROM ubuntu:22.04
+FROM debian:bullseye
 
-# Set environment variables
-ENV DEBIAN_FRONTEND=noninteractive \
-    TZ=Asia/Kolkata \
-    USER=root \
-    HOME=/root \
-    DISPLAY=:1
+# Set environment variables to non-interactive to avoid install prompts
+ENV DEBIAN_FRONTEND=noninteractive
+ENV USER=root
 
-# Set timezone
-RUN ln -fs /usr/share/zoneinfo/Asia/Kolkata /etc/localtime && \
-    echo "Asia/Kolkata" > /etc/timezone
+# 1. Enable 386 architecture
+RUN dpkg --add-architecture i386
 
-# Install packages
-RUN apt update && apt install -y \
-    xfce4 \
-    xfce4-goodies \
-    tightvncserver \
-    novnc \
-    websockify \
-    wget \
-    sudo \
-    dbus-x11 \
-    x11-utils \
-    x11-xserver-utils \
-    && apt clean && \
-    rm -rf /var/lib/apt/lists/*
+# 2. Update and Install Dependencies
+# Added: python3 (for noVNC), procps, clean package names
+RUN apt-get update && apt-get install -y \
+    wine qemu-kvm xz-utils dbus-x11 curl firefox-esr \
+    gnome-system-monitor git xfce4 xfce4-terminal \
+    tightvncserver wget python3 python3-numpy \
+    fonts-wqy-zenhei \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Setup VNC password (echo password twice for confirmation, then 'n' for view-only access)
-RUN mkdir -p /root/.vnc && \
-    printf "password123\npassword123\nn\n" | vncpasswd && \
-    chmod 600 /root/.vnc/passwd
+# 3. Setup noVNC
+RUN wget -q https://github.com/novnc/noVNC/archive/refs/tags/v1.2.0.tar.gz \
+    && tar -xvf v1.2.0.tar.gz \
+    && mv noVNC-1.2.0 /opt/noVNC \
+    && rm v1.2.0.tar.gz
 
-# Create xstartup with proper configuration
-RUN echo '#!/bin/bash\n\
-unset SESSION_MANAGER\n\
-unset DBUS_SESSION_BUS_ADDRESS\n\
-[ -x /etc/vnc/xstartup ] && exec /etc/vnc/xstartup\n\
-[ -r $HOME/.Xresources ] && xrdb $HOME/.Xresources\n\
-xsetroot -solid grey\n\
-vncconfig -iconic &\n\
-startxfce4 &' > /root/.vnc/xstartup && \
-    chmod +x /root/.vnc/xstartup
+# 4. Setup VNC Directory and Password
+# Note: It is safer to pass the password at runtime, but keeping your logic for now:
+RUN mkdir -p $HOME/.vnc \
+    && echo 'admin123@a' | vncpasswd -f > $HOME/.vnc/passwd \
+    && chmod 600 $HOME/.vnc/passwd
 
-# Get noVNC
-RUN wget -q https://github.com/novnc/noVNC/archive/refs/tags/v1.4.0.tar.gz -O /tmp/novnc.tar.gz && \
-    tar -xzf /tmp/novnc.tar.gz -C /opt/ && \
-    mv /opt/noVNC-1.4.0 /opt/novnc && \
-    rm /tmp/novnc.tar.gz && \
-    wget -q https://github.com/novnc/websockify/archive/refs/tags/v0.11.0.tar.gz -O /tmp/websockify.tar.gz && \
-    tar -xzf /tmp/websockify.tar.gz -C /opt/novnc/utils/ && \
-    mv /opt/novnc/utils/websockify-0.11.0 /opt/novnc/utils/websockify && \
-    rm /tmp/websockify.tar.gz
+# 5. Setup Xstartup (Configures VNC to use XFCE)
+RUN echo '#!/bin/sh' > $HOME/.vnc/xstartup \
+    && echo 'unset SESSION_MANAGER' >> $HOME/.vnc/xstartup \
+    && echo 'unset DBUS_SESSION_BUS_ADDRESS' >> $HOME/.vnc/xstartup \
+    && echo '/usr/bin/startxfce4' >> $HOME/.vnc/xstartup \
+    && chmod +x $HOME/.vnc/xstartup
 
-EXPOSE 10000
+# 6. Copy the start script (See file below)
+COPY start.sh /start.sh
+RUN chmod +x /start.sh
 
-# Start command
-CMD echo "Starting VNC server..." && \
-    vncserver :1 -geometry 1280x720 -depth 24 && \
-    echo "VNC started successfully on display :1" && \
-    /opt/novnc/utils/novnc_proxy --vnc localhost:5901 --listen 0.0.0.0:10000 && \
-    tail -f /dev/null
+# 7. Expose ports (8900 for web access)
+EXPOSE 8900
+
+CMD ["/start.sh"]

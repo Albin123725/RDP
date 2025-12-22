@@ -28,7 +28,6 @@ RUN apt update && apt install -y \
     xfonts-scalable \
     x11-xserver-utils \
     xserver-xorg-video-dummy \
-    xserver-xorg-input-void \
     xserver-xorg-core \
     && rm -rf /var/lib/apt/lists/*
 

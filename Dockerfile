@@ -7,15 +7,21 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV DISPLAY=:1
 ENV RESOLUTION=1280x720
 ENV VNC_PASSWORD=vncpassword
-ENV PORT=10000  # Critical: Match Render's internal port
 
-# Install
+# Critical: Match Render's internal port
+ENV PORT=10000
+
+# Install packages
 RUN apt-get update && apt-get install -y \
-    xfce4 xfce4-goodies \
+    xfce4 \
+    xfce4-goodies \
     tigervnc-standalone-server \
-    novnc websockify \
+    novnc \
+    websockify \
     supervisor \
-    curl wget \
+    curl \
+    wget \
+    x11-xserver-utils \
     && rm -rf /var/lib/apt/lists/*
 
 # Setup VNC
@@ -24,9 +30,9 @@ RUN mkdir -p /root/.vnc && \
     chmod 600 /root/.vnc/passwd
 
 # Create xstartup
-RUN echo '#!/bin/sh\n\
-unset SESSION_MANAGER\n\
-unset DBUS_SESSION_BUS_ADDRESS\n\
+RUN echo '#!/bin/sh
+unset SESSION_MANAGER
+unset DBUS_SESSION_BUS_ADDRESS
 exec startxfce4' > /root/.vnc/xstartup && \
     chmod +x /root/.vnc/xstartup
 

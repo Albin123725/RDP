@@ -14,22 +14,21 @@ ENV VNC_DEPTH=16
 RUN ln -fs /usr/share/zoneinfo/UTC /etc/localtime && \
     echo "UTC" > /etc/timezone
 
-# Install MINIMAL packages
+# Install MINIMAL packages with CORRECT names
 RUN apt update && apt install -y \
-    # Core XFCE (minimal)
+    # Core XFCE components
     xfce4 \
     xfce4-terminal \
     thunar \
     xfce4-panel \
     xfwm4 \
-    xfdesktop4 \
+    xfdesktop4-data \
     xfsettingsd \
     # VNC
     tightvncserver \
-    # Browser - Use Firefox ESR (more stable)
+    # Browser - Use Firefox ESR
     firefox-esr \
-    # Terminal already installed (xfce4-terminal)
-    # Essential system libraries
+    # Essential libraries
     libglib2.0-0 \
     libgtk-3-0 \
     libnotify4 \
@@ -42,11 +41,13 @@ RUN apt update && apt install -y \
     x11-xserver-utils \
     xauth \
     xinit \
+    # D-Bus for Firefox
+    dbus-x11 \
     --no-install-recommends && \
     apt clean && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-# Remove unnecessary components to save memory
+# Remove unnecessary components
 RUN apt purge -y \
     xfce4-screensaver \
     xfce4-power-manager \
@@ -64,32 +65,22 @@ RUN cat > /root/.vnc/xstartup << 'EOF'
 unset SESSION_MANAGER
 unset DBUS_SESSION_BUS_ADDRESS
 
+# Start D-Bus for Firefox
+dbus-launch --sh-syntax --exit-with-session > /tmp/dbus.env
+source /tmp/dbus.env
+
 # Start XFCE components
-xfwm4 &
-xfsettingsd --daemon
-xfce4-panel &
-xfdesktop &
-
-# Start Thunar file manager in background
-thunar --daemon &
-
-# Set Firefox as default browser
-update-alternatives --set x-www-browser /usr/bin/firefox-esr
-update-alternatives --set gnome-www-browser /usr/bin/firefox-esr
-
-# Launch xfce4-terminal
-xfce4-terminal &
+startxfce4 &
 EOF
 
 RUN chmod +x /root/.vnc/xstartup
 
-# Configure Firefox to work in VNC environment
-RUN mkdir -p /root/.mozilla/firefox-esr/default && \
-    echo 'user_pref("browser.shell.checkDefaultBrowser", false);' > /root/.mozilla/firefox-esr/default/prefs.js && \
-    echo 'user_pref("browser.sessionstore.resume_from_crash", false);' >> /root/.mozilla/firefox-esr/default/prefs.js && \
-    echo 'user_pref("browser.startup.homepage", "about:blank");' >> /root/.mozilla/firefox-esr/default/prefs.js && \
-    echo 'user_pref("browser.tabs.remote.autostart", false);' >> /root/.mozilla/firefox-esr/default/prefs.js && \
-    echo 'user_pref("browser.tabs.remote.autostart.2", false);' >> /root/.mozilla/firefox-esr/default/prefs.js
+# Configure Firefox preferences
+RUN mkdir -p /root/.mozilla/firefox/default && \
+    echo 'user_pref("browser.shell.checkDefaultBrowser", false);' > /root/.mozilla/firefox/default/prefs.js && \
+    echo 'user_pref("browser.sessionstore.resume_from_crash", false);' >> /root/.mozilla/firefox/default/prefs.js && \
+    echo 'user_pref("browser.startup.homepage", "about:blank");' >> /root/.mozilla/firefox/default/prefs.js && \
+    echo 'user_pref("browser.tabs.remote.autostart", false);' >> /root/.mozilla/firefox/default/prefs.js
 
 # Download noVNC
 RUN wget -q https://github.com/novnc/noVNC/archive/refs/tags/v1.4.0.tar.gz -O /tmp/novnc.tar.gz && \
@@ -107,67 +98,47 @@ RUN cp /opt/novnc/vnc_lite.html /opt/novnc/index.html
 # Fix VNC server font path issue
 RUN sed -i 's|^\(.*\$fontPath =\).*$|\1 "";|' /usr/bin/vncserver
 
-# Create browser test script
-RUN cat > /test-browser.sh << 'EOF'
+# Create desktop launcher for Firefox
+RUN mkdir -p /root/Desktop && \
+    echo '[Desktop Entry]' > /root/Desktop/firefox.desktop && \
+    echo 'Version=1.0' >> /root/Desktop/firefox.desktop && \
+    echo 'Name=Firefox Browser' >> /root/Desktop/firefox.desktop && \
+    echo 'Comment=Browse the Internet' >> /root/Desktop/firefox.desktop && \
+    echo 'Exec=firefox-esr' >> /root/Desktop/firefox.desktop && \
+    echo 'Icon=firefox-esr' >> /root/Desktop/firefox.desktop && \
+    echo 'Terminal=false' >> /root/Desktop/firefox.desktop && \
+    echo 'Type=Application' >> /root/Desktop/firefox.desktop && \
+    echo 'Categories=Network;WebBrowser;' >> /root/Desktop/firefox.desktop && \
+    chmod +x /root/Desktop/firefox.desktop
+
+# Create a simple test script
+RUN cat > /test-gui.sh << 'EOF'
 #!/bin/bash
-echo "Testing browser setup..."
-echo "1. Checking Firefox installation..."
-if command -v firefox-esr >/dev/null 2>&1; then
-    echo "   ✓ Firefox ESR installed"
-else
-    echo "   ✗ Firefox ESR not found"
-fi
-
-echo "2. Checking default browser..."
-DEFAULT_BROWSER=$(update-alternatives --query x-www-browser | grep "Value:" | cut -d' ' -f2)
-if [ "$DEFAULT_BROWSER" = "/usr/bin/firefox-esr" ]; then
-    echo "   ✓ Firefox ESR is default browser"
-else
-    echo "   ✗ Default browser: $DEFAULT_BROWSER"
-fi
-
-echo "3. Testing Firefox in minimal mode..."
-timeout 5 firefox-esr --headless --screenshot /tmp/test.png https://example.com 2>/dev/null
-if [ $? -eq 0 ]; then
-    echo "   ✓ Firefox can render pages"
-    rm -f /tmp/test.png
-else
-    echo "   ⚠ Firefox headless test failed (GUI may still work)"
-fi
-
-echo "4. Creating desktop launcher..."
-cat > /root/Desktop/firefox.desktop << 'DESKTOP'
-[Desktop Entry]
-Version=1.0
-Name=Firefox Browser
-Comment=Browse the Internet
-Exec=firefox-esr
-Icon=firefox-esr
-Terminal=false
-Type=Application
-Categories=Network;WebBrowser;
-DESKTOP
-chmod +x /root/Desktop/firefox.desktop
-echo "   ✓ Desktop launcher created"
-
+echo "=== GUI Test ==="
+echo "1. XFCE components:"
+which startxfce4 && echo "  ✓ startxfce4 installed"
+which xfce4-terminal && echo "  ✓ Terminal installed"
+which thunar && echo "  ✓ File manager installed"
+which firefox-esr && echo "  ✓ Firefox installed"
 echo ""
-echo "To open browser:"
-echo "1. Double-click Firefox icon on desktop"
-echo "2. Or run in terminal: firefox-esr"
-echo "3. Or press Alt+F2 and type: firefox-esr"
+echo "2. To open programs:"
+echo "   - Firefox: Double-click desktop icon or run 'firefox-esr'"
+echo "   - Terminal: Already open or run 'xfce4-terminal'"
+echo "   - File Manager: Run 'thunar'"
 EOF
 
-RUN chmod +x /test-browser.sh
+RUN chmod +x /test-gui.sh
 
 EXPOSE 10000
 
 # Startup script
 CMD echo "Starting VNC server..." && \
     vncserver :1 -geometry ${VNC_RESOLUTION} -depth ${VNC_DEPTH} && \
-    echo "VNC started on :1" && \
-    echo "Testing browser setup..." && \
-    /test-browser.sh && \
+    echo "VNC started on display :1" && \
+    echo "Running GUI test..." && \
+    /test-gui.sh && \
     echo "Starting noVNC proxy..." && \
     /opt/novnc/utils/novnc_proxy --vnc localhost:5901 --listen 0.0.0.0:10000 --heartbeat 30 --web /opt/novnc && \
-    echo "Access at: http://localhost:10000" && \
+    echo "VNC Desktop ready! Access at your Render URL" && \
+    echo "Password: albin4242" && \
     tail -f /dev/null

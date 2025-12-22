@@ -1,7 +1,6 @@
 .git
 .gitignore
-README.md
-docker-compose.yml
-data/
+*.md
 *.log
+data/
 .env

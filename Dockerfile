@@ -14,44 +14,73 @@ ENV VNC_DEPTH=16
 RUN ln -fs /usr/share/zoneinfo/Asia/Kolkata /etc/localtime && \
     echo "Asia/Kolkata" > /etc/timezone
 
-# Install packages
+# Install only essential packages
 RUN apt update && apt install -y \
     xfce4 \
-    xfce4-goodies \
+    xfce4-terminal \
+    xfce4-panel \
+    xfdesktop4 \
+    thunar \
+    firefox \
     tightvncserver \
     novnc \
     websockify \
     wget \
-    sudo \
-    dbus-x11 \
-    x11-utils \
-    x11-xserver-utils \
-    xfonts-base \
-    xfonts-100dpi \
-    xfonts-75dpi \
-    && apt clean \
-    && rm -rf /var/lib/apt/lists/*
+    --no-install-recommends && \
+    apt clean && \
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* && \
+    # Remove unnecessary components
+    apt purge -y \
+        xfce4-screensaver \
+        xfce4-power-manager \
+        xfce4-taskmanager \
+        xfce4-appfinder \
+        xfce4-clipman \
+        xfce4-notifyd \
+        xfce4-volumed \
+        mousepad \
+        orage \
+        parole \
+        ristretto \
+        thunar-archive-plugin \
+        thunar-media-tags-plugin \
+        xfburn \
+        xfce4-cpufreq-plugin \
+        xfce4-dict \
+        xfce4-mailwatch-plugin \
+        xfce4-netload-plugin \
+        xfce4-notes-plugin \
+        xfce4-places-plugin \
+        xfce4-sensors-plugin \
+        xfce4-smartbookmark-plugin \
+        xfce4-systemload-plugin \
+        xfce4-timer-plugin \
+        xfce4-verve-plugin \
+        xfce4-weather-plugin \
+        xfce4-whiskermenu-plugin \
+        xfce4-wavelan-plugin && \
+    apt autoremove -y && \
+    apt autoclean && \
+    # Remove more unnecessary files
+    rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/locale/* /usr/share/icons/*
 
 # Setup VNC
 RUN mkdir -p /root/.vnc && \
-    printf "${VNC_PASSWD}\n${VNC_PASSWD}\nn\n" | vncpasswd && \
+    echo "$VNC_PASSWD" | vncpasswd -f > /root/.vnc/passwd && \
     chmod 600 /root/.vnc/passwd
 
-# Create xstartup with clipboard support
+# Minimal xstartup with only what we need
 RUN cat > /root/.vnc/xstartup << 'EOF'
 #!/bin/bash
 unset SESSION_MANAGER
 unset DBUS_SESSION_BUS_ADDRESS
-[ -x /etc/vnc/xstartup ] && exec /etc/vnc/xstartup
-[ -r $HOME/.Xresources ] && xrdb $HOME/.Xresources
 xsetroot -solid grey
-# Start vncconfig for VNC clipboard
-vncconfig -nowin &
-# Disable composite manager
-xfwm4 --compositor=off &
-xfsettingsd --daemon
-xfce4-panel &
+# Start Xfce with minimal components
+xfwm4 --daemon --compositor=off
 xfdesktop &
+xfce4-panel &
+xfce4-terminal &
+thunar &
 EOF
 
 RUN chmod +x /root/.vnc/xstartup
@@ -66,71 +95,52 @@ RUN wget -q https://github.com/novnc/noVNC/archive/refs/tags/v1.4.0.tar.gz -O /t
     mv /opt/novnc/utils/websockify-0.11.0 /opt/novnc/utils/websockify && \
     rm /tmp/websockify.tar.gz
 
-# Install CopyQ - Modern clipboard manager with icon
-RUN apt update && apt install -y \
-    copyq \
-    xclip \
-    && apt clean \
-    && rm -rf /var/lib/apt/lists/*
+# Configure Firefox for Google Colab (minimal settings)
+RUN mkdir -p /root/.mozilla/firefox/default && \
+    cat > /root/.mozilla/firefox/default/prefs.js << 'EOF'
+// Disable updates and telemetry
+user_pref("app.update.auto", false);
+user_pref("app.update.enabled", false);
+user_pref("browser.shell.checkDefaultBrowser", false);
+user_pref("datareporting.healthreport.uploadEnabled", false);
+user_pref("datareporting.policy.dataSubmissionEnabled", false);
+user_pref("devtools.onboarding.telemetry.logged", false);
+user_pref("toolkit.telemetry.archive.enabled", false);
+user_pref("toolkit.telemetry.bhrPing.enabled", false);
+user_pref("toolkit.telemetry.enabled", false);
+user_pref("toolkit.telemetry.firstShutdownPing.enabled", false);
+user_pref("toolkit.telemetry.hybridContent.enabled", false);
+user_pref("toolkit.telemetry.newProfilePing.enabled", false);
+user_pref("toolkit.telemetry.reportingpolicy.firstRun", false);
+user_pref("toolkit.telemetry.shutdownPingSender.enabled", false);
+user_pref("toolkit.telemetry.unified", false);
+user_pref("toolkit.telemetry.updatePing.enabled", false);
 
-# Configure CopyQ to start with icon and enable VNC clipboard
-RUN mkdir -p /root/.config/copyq && \
-    cat > /root/.config/copyq/copyq.conf << 'EOF'
-[General]
-autostart=true
-check_clipboard=true
-check_selection=true
-maxitems=50
-show_tray=true
-tab_names=clipboard
-tray_commands=show
-tray_items=10
+// Performance optimizations
+user_pref("browser.cache.disk.enable", false);
+user_pref("browser.cache.memory.enable", true);
+user_pref("browser.sessionhistory.max_total_viewers", 0);
+user_pref("browser.sessionstore.interval", 60000);
+user_pref("browser.startup.page", 0);
+user_pref("browser.tabs.animate", false);
+user_pref("browser.urlbar.suggest.searches", false);
+user_pref("dom.ipc.processCount", 1);
+user_pref("extensions.pocket.enabled", false);
+user_pref("gfx.canvas.accelerated", false);
+user_pref("gfx.webrender.all", false);
 EOF
 
-# Create a simple clipboard sync script
-RUN cat > /usr/local/bin/sync-clipboard << 'EOF'
-#!/bin/bash
-# Simple clipboard sync for VNC
-while true; do
-    # Keep vncconfig running
-    if ! pgrep -x "vncconfig" > /dev/null; then
-        vncconfig -nowin &
-    fi
-    sleep 5
-done
-EOF
-
-RUN chmod +x /usr/local/bin/sync-clipboard
-
-# Add clipboard startup to xstartup
-RUN cat >> /root/.vnc/xstartup << 'EOF'
-
-# Start CopyQ with icon
-copyq &
-sleep 2
-
-# Start clipboard sync
-/usr/local/bin/sync-clipboard &
-EOF
-
-# Create a test file to verify
-RUN echo "echo 'Clipboard test successful! Copy this text and try to paste.'" > /test-clip.sh && \
-    chmod +x /test-clip.sh
-
-# Copy noVNC HTML files
+# Copy noVNC HTML files for health check
 RUN cp /opt/novnc/vnc_lite.html /opt/novnc/index.html
 
-# Fix vncserver
-RUN sed -i '/^\s*\$fontPath\s*=/{s/.*/\$fontPath = "";/}' /usr/bin/vncserver
+# Fix vncserver font path issue
+RUN sed -i 's/^.*\$fontPath.*=.*/\$fontPath = "";/' /usr/bin/vncserver
 
 EXPOSE 10000
 
-# Startup
+# Simple startup script
 CMD echo "Starting VNC server..." && \
     vncserver :1 -geometry ${VNC_RESOLUTION} -depth ${VNC_DEPTH} && \
-    echo "VNC started on display :1" && \
-    echo "Starting noVNC..." && \
-    /opt/novnc/utils/novnc_proxy --vnc localhost:5901 --listen 0.0.0.0:10000 --heartbeat 30 --web /opt/novnc && \
-    echo "Ready! CopyQ icon should appear in system tray." && \
-    echo "Test: Run /test-clip.sh in terminal" && \
-    tail -f /dev/null
+    echo "VNC started successfully" && \
+    echo "Starting noVNC proxy..." && \
+    /opt/novnc/utils/novnc_proxy --vnc localhost:5901 --listen 0.0.0.0:10000 --heartbeat 30 --web /opt/novnc

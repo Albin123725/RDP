@@ -8,17 +8,16 @@ ENV HOME=/root
 ENV DISPLAY=:1
 ENV VNC_PASSWD=albin4242
 ENV VNC_RESOLUTION=1024x576
-# Reduced from 24 to save memory
 ENV VNC_DEPTH=16
 
 # Set timezone
 RUN ln -fs /usr/share/zoneinfo/Asia/Kolkata /etc/localtime && \
     echo "Asia/Kolkata" > /etc/timezone
 
-# Install minimal required packages and clean up aggressively
+# Install packages with clipboard support
 RUN apt update && apt install -y \
     xfce4 \
-    xfce4-goodies \
+    xfce4-terminal \
     tightvncserver \
     novnc \
     websockify \
@@ -27,28 +26,30 @@ RUN apt update && apt install -y \
     dbus-x11 \
     x11-utils \
     x11-xserver-utils \
-    xfonts-base \
-    xfonts-100dpi \
-    xfonts-75dpi \
-    # Clipboard support for copy-paste
+    # Clipboard tools
     autocutsel \
     xclip \
+    parcellite \
+    copyq \
+    # Terminal with better copy-paste
+    terminator \
+    # Utilities
+    net-tools \
+    curl \
     --no-install-recommends && \
     apt clean && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* && \
-    # Remove unnecessary documentation and locales
     rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/locale/* && \
-    # Remove Xfce components that aren't essential
     apt purge -y xfce4-screensaver xfce4-power-manager xscreensaver* && \
     apt autoremove -y && \
     apt autoclean
 
-# Setup VNC password with less memory-intensive settings
+# Setup VNC password
 RUN mkdir -p /root/.vnc && \
     printf "${VNC_PASSWD}\n${VNC_PASSWD}\nn\n" | vncpasswd && \
     chmod 600 /root/.vnc/passwd
 
-# Create optimized xstartup with memory-saving options AND clipboard support
+# Create xstartup with MULTIPLE clipboard solutions
 RUN cat > /root/.vnc/xstartup << 'EOF'
 #!/bin/bash
 unset SESSION_MANAGER
@@ -57,18 +58,71 @@ unset DBUS_SESSION_BUS_ADDRESS
 [ -r $HOME/.Xresources ] && xrdb $HOME/.Xresources
 xsetroot -solid grey
 vncconfig -iconic &
-# Start clipboard synchronization for copy-paste support
+# Start MULTIPLE clipboard sync solutions
+# Solution 1: autocutsel (primary + clipboard)
 autocutsel -fork &
 autocutsel -s CLIPBOARD -fork &
-# Disable composite manager to save memory
+# Solution 2: Parcellite (clipboard manager with GUI)
+parcellite &
+# Solution 3: copyq (advanced clipboard manager)
+copyq &
+# Start XFCE
 xfwm4 --compositor=off &
-# Start with minimal Xfce components
 xfsettingsd --daemon
 xfce4-panel &
 xfdesktop &
+# Start Terminator (better terminal with copy-paste)
+terminator &
 EOF
 
 RUN chmod +x /root/.vnc/xstartup
+
+# Configure Terminator for easy copy-paste
+RUN mkdir -p /root/.config/terminator && \
+    cat > /root/.config/terminator/config << 'EOF'
+[global_config]
+  title_transmit_bg_color = "#d30102"
+[keybindings]
+  copy = <Primary><Shift>c
+  paste = <Primary><Shift>v
+[profiles]
+  [[default]]
+    background_color = "#300a24"
+    cursor_color = "#aaaaaa"
+    foreground_color = "#ffffff"
+    palette = "#2d2d2d:#f2777a:#99cc99:#ffcc66:#6699cc:#cc99cc:#66cccc:#d3d0c8:#747369:#f2777a:#99cc99:#ffcc66:#6699cc:#cc99cc:#66cccc:#f2f0ec"
+    scroll_on_output = False
+    use_system_font = False
+    font = Monospace 10
+[layouts]
+  [[default]]
+    [[[child1]]]
+      type = Terminal
+      parent = window0
+    [[[window0]]]
+      type = Window
+      parent = ""
+[plugins]
+EOF
+
+# Configure Parcellite clipboard manager
+RUN mkdir -p /root/.config/parcellite && \
+    cat > /root/.config/parcellite/parcelliterc << 'EOF'
+[rc]
+use_copy=1
+use_primary=1
+synchronize=1
+history_limit=50
+save_history=1
+hyperlinks_only=0
+confirm_clear=1
+item_length=50
+history_key=...
+primary_key=...
+clipboard_key=...
+actions_key=...
+[hidden]
+EOF
 
 # Get noVNC
 RUN wget -q https://github.com/novnc/noVNC/archive/refs/tags/v1.4.0.tar.gz -O /tmp/novnc.tar.gz && \
@@ -80,76 +134,89 @@ RUN wget -q https://github.com/novnc/noVNC/archive/refs/tags/v1.4.0.tar.gz -O /t
     mv /opt/novnc/utils/websockify-0.11.0 /opt/novnc/utils/websockify && \
     rm /tmp/websockify.tar.gz
 
-# Create cleanup script for periodic memory management
-RUN cat > /cleanup.sh << 'EOF'
+# Create clipboard test and fix script
+RUN cat > /fix-clipboard.sh << 'EOF'
 #!/bin/bash
-while true; do
-    # Clean up temporary files
-    find /tmp -type f -atime +1 -delete 2>/dev/null || true
-    find /var/tmp -type f -atime +1 -delete 2>/dev/null || true
-    # Kill any zombie processes
-    ps aux | grep "defunct" | grep -v grep | awk "{print \$2}" | xargs -r kill -9 2>/dev/null || true
-    # Restart clipboard sync if it dies
-    if ! pgrep -x "autocutsel" > /dev/null; then
-        autocutsel -fork &
-        autocutsel -s CLIPBOARD -fork &
-    fi
-    sleep 300
-done
+echo "=== CLIPBOARD FIX TOOL ==="
+echo ""
+echo "Clipboard solutions installed:"
+echo "1. autocutsel - System clipboard sync"
+echo "2. parcellite - Clipboard manager (tray icon)"
+echo "3. copyq - Advanced clipboard (Ctrl+Shift+V)"
+echo "4. Terminator terminal (Ctrl+Shift+C/V)"
+echo ""
+echo "Testing clipboard..."
+pkill autocutsel
+pkill parcellite
+pkill copyq
+sleep 2
+autocutsel -fork &
+autocutsel -s CLIPBOARD -fork &
+parcellite &
+copyq &
+echo "Clipboard services restarted!"
+echo ""
+echo "=== HOW TO COPY-PASTE ==="
+echo "FROM LOCAL to VNC:"
+echo "1. Copy text on your computer (Ctrl+C)"
+echo "2. Click inside VNC window"
+echo "3. Press Ctrl+V or Ctrl+Shift+V"
+echo "4. OR: Right-click → Paste"
+echo "5. OR: Click Parcellite tray icon"
+echo ""
+echo "FROM VNC to LOCAL:"
+echo "1. Select text in VNC"
+echo "2. Copy with Ctrl+C or Ctrl+Shift+C"
+echo "3. Click outside VNC window"
+echo "4. Paste with Ctrl+V on your computer"
+echo ""
+echo "Terminal copy-paste:"
+echo "Copy: Ctrl+Shift+C"
+echo "Paste: Ctrl+Shift+V"
 EOF
 
-RUN chmod +x /cleanup.sh
+RUN chmod +x /fix-clipboard.sh
 
-# Create clipboard test script
-RUN cat > /clipboard-test.sh << 'EOF'
-#!/bin/bash
-echo "Clipboard Test Script"
-echo "===================="
-echo ""
-echo "To test copy-paste:"
-echo "1. Copy this text from VNC: VNC_TO_LOCAL_TEST"
-echo "2. Paste it outside VNC (in your local machine)"
-echo "3. Copy this from local: LOCAL_TO_VNC_TEST" 
-echo "4. Paste it inside VNC terminal with Ctrl+Shift+V"
-echo ""
-echo "Clipboard status:"
-if pgrep -x "autocutsel" > /dev/null; then
-    echo "✓ Clipboard sync is running"
-else
-    echo "✗ Clipboard sync is NOT running"
-    echo "Starting it now..."
-    autocutsel -fork &
-    autocutsel -s CLIPBOARD -fork &
-fi
+# Create desktop shortcuts for clipboard tools
+RUN cat > /root/Desktop/Clipboard-Fix.desktop << 'EOF'
+[Desktop Entry]
+Name=Fix Clipboard
+Comment=Restart clipboard services
+Exec=/fix-clipboard.sh
+Icon=edit-paste
+Terminal=true
+Type=Application
 EOF
 
-RUN chmod +x /clipboard-test.sh
+RUN cat > /root/Desktop/Terminal.desktop << 'EOF'
+[Desktop Entry]
+Name=Terminal (Better Copy-Paste)
+Comment=Terminal with Ctrl+Shift+C/V
+Exec=terminator
+Icon=utilities-terminal
+Terminal=false
+Type=Application
+EOF
 
-# Copy noVNC HTML files to serve as health check endpoint
+RUN chmod +x /root/Desktop/*.desktop
+
+# Copy noVNC HTML files
 RUN cp /opt/novnc/vnc_lite.html /opt/novnc/index.html
 
-# Fix the vncserver configuration more carefully
+# Fix VNC server font path
 RUN sed -i '/^\s*\$fontPath\s*=/{s/.*/\$fontPath = "";/}' /usr/bin/vncserver
 
 EXPOSE 10000
 
-# Simple startup script that works with clipboard support
-CMD echo "Starting VNC server..." && \
-    /cleanup.sh & \
-    # Start VNC server without the problematic -fp option
+# Startup with clipboard emphasis
+CMD echo "Starting VNC with clipboard support..." && \
+    /fix-clipboard.sh & \
     vncserver :1 -geometry ${VNC_RESOLUTION} -depth ${VNC_DEPTH} && \
-    echo "VNC started successfully on display :1" && \
-    echo "Starting clipboard synchronization..." && \
-    autocutsel -fork & \
-    autocutsel -s CLIPBOARD -fork & \
-    echo "Clipboard sync started - you can now copy-paste between VNC and local machine" && \
-    echo "Starting noVNC proxy..." && \
-    # Start noVNC proxy
-    /opt/novnc/utils/novnc_proxy --vnc localhost:5901 --listen 0.0.0.0:10000 --heartbeat 30 --web /opt/novnc && \
-    echo "noVNC started on port 10000" && \
+    echo "VNC started on :1" && \
     echo "" && \
-    echo "=== Clipboard Instructions ===" && \
-    echo "Copy from LOCAL to VNC: Ctrl+C local → Ctrl+V in VNC" && \
-    echo "Copy from VNC to LOCAL: Ctrl+C in VNC → Ctrl+V local" && \
-    echo "Run /clipboard-test.sh to verify" && \
+    echo "=== CLIPBOARD READY ===" && \
+    echo "Use Ctrl+V to paste from your computer to VNC" && \
+    echo "Use Ctrl+Shift+V in Terminator terminal" && \
+    echo "Click 'Clipboard-Fix' on desktop if not working" && \
+    /opt/novnc/utils/novnc_proxy --vnc localhost:5901 --listen 0.0.0.0:10000 --heartbeat 30 --web /opt/novnc && \
     tail -f /dev/null

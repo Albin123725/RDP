@@ -30,8 +30,8 @@ RUN apt update && apt install -y \
     xfonts-base \
     xfonts-100dpi \
     xfonts-75dpi \
-    # Add Midori lightweight browser
-    midori \
+    # Add Epiphany (GNOME Web) lightweight browser instead of Midori
+    epiphany-browser \
     --no-install-recommends && \
     apt clean && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* && \
@@ -39,8 +39,8 @@ RUN apt update && apt install -y \
     rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/locale/* && \
     # Remove Xfce components that aren't essential
     apt purge -y xfce4-screensaver xfce4-power-manager xscreensaver* && \
-    # Remove unnecessary Midori docs and localization to save space
-    rm -rf /usr/share/doc/midori /usr/share/locale/*/LC_MESSAGES/midori.mo && \
+    # Remove unnecessary Epiphany docs to save space
+    rm -rf /usr/share/doc/epiphany* && \
     apt autoremove -y && \
     apt autoclean
 
@@ -87,10 +87,10 @@ while true; do
     find /var/tmp -type f -atime +1 -delete 2>/dev/null || true
     # Kill any zombie processes
     ps aux | grep "defunct" | grep -v grep | awk "{print \$2}" | xargs -r kill -9 2>/dev/null || true
-    # Kill Midori if it's using too much memory (optional safety measure)
-    # Uncomment below if Midori causes memory issues
-    # if [ $(ps aux | grep midori | grep -v grep | wc -l) -gt 0 ]; then
-    #     ps aux --sort=-%mem | grep midori | grep -v grep | head -1 | awk '{if($4 > 50) print $2}' | xargs -r kill -9 2>/dev/null || true
+    # Kill Epiphany if it's using too much memory (optional safety measure)
+    # Uncomment below if browser causes memory issues
+    # if [ $(ps aux | grep epiphany | grep -v grep | wc -l) -gt 0 ]; then
+    #     ps aux --sort=-%mem | grep epiphany | grep -v grep | head -1 | awk '{if($4 > 50) print $2}' | xargs -r kill -9 2>/dev/null || true
     # fi
     sleep 300
 done

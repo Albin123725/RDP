@@ -6,15 +6,8 @@ services:
     plan: free
     autoDeploy: true
     port: 8080
-    healthCheckPath: /
     envVars:
       - key: DISPLAY
-        value: :99
+        value: :1
       - key: USER
         value: root
-      - key: HOME
-        value: /root
-    disk:
-      name: data
-      mountPath: /data
-      sizeGB: 1

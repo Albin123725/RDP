@@ -2,108 +2,96 @@ FROM ubuntu:22.04
 
 # Set environment variables
 ENV DEBIAN_FRONTEND=noninteractive
-ENV TZ=Asia/Kolkata
+ENV TZ=UTC
 ENV USER=root
 ENV HOME=/root
 ENV DISPLAY=:1
 ENV VNC_PASSWD=albin4242
 ENV VNC_RESOLUTION=1024x576
-# Reduced from 24 to save memory
 ENV VNC_DEPTH=16
 
 # Set timezone
-RUN ln -fs /usr/share/zoneinfo/Asia/Kolkata /etc/localtime && \
-    echo "Asia/Kolkata" > /etc/timezone
+RUN ln -fs /usr/share/zoneinfo/UTC /etc/localtime && \
+    echo "UTC" > /etc/timezone
 
-# Install minimal required packages and clean up aggressively
+# Install MINIMAL packages
 RUN apt update && apt install -y \
+    # Core XFCE (minimal)
     xfce4 \
-    xfce4-goodies \
+    xfce4-terminal \
+    thunar \
+    xfce4-panel \
+    xfwm4 \
+    xfdesktop4 \
+    xfsettingsd \
+    # VNC
     tightvncserver \
-    novnc \
-    websockify \
-    wget \
-    sudo \
-    dbus-x11 \
-    x11-utils \
-    x11-xserver-utils \
-    xfonts-base \
-    xfonts-100dpi \
-    xfonts-75dpi \
-    # Add lightweight browser alternatives
-    firefox \
-    # Clipboard support tools
-    autocutsel \
-    xclip \
-    # For proper browser integration
+    # Browser - Use Firefox ESR (more stable)
+    firefox-esr \
+    # Terminal already installed (xfce4-terminal)
+    # Essential system libraries
+    libglib2.0-0 \
+    libgtk-3-0 \
+    libnotify4 \
+    libnss3 \
+    libxss1 \
+    libxtst6 \
     xdg-utils \
-    xdg-user-dirs \
+    wget \
+    # X11 essentials
+    x11-xserver-utils \
+    xauth \
+    xinit \
     --no-install-recommends && \
     apt clean && \
-    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* && \
-    # Remove unnecessary documentation and locales
-    rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/locale/* && \
-    # Remove Xfce components that aren't essential
-    apt purge -y xfce4-screensaver xfce4-power-manager xscreensaver* && \
-    # Clean up Firefox to reduce size (keep minimal)
-    rm -rf /usr/lib/firefox/distribution/extensions \
-           /usr/share/doc/firefox* \
-           /usr/share/locale/*/firefox* \
-           /usr/share/locale/*/thunderbird* && \
-    apt autoremove -y && \
-    apt autoclean
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-# Setup VNC password with less memory-intensive settings
+# Remove unnecessary components to save memory
+RUN apt purge -y \
+    xfce4-screensaver \
+    xfce4-power-manager \
+    xscreensaver* \
+    && apt autoremove -y
+
+# Setup VNC password
 RUN mkdir -p /root/.vnc && \
     printf "${VNC_PASSWD}\n${VNC_PASSWD}\nn\n" | vncpasswd && \
     chmod 600 /root/.vnc/passwd
 
-# Configure default web browser and fix desktop integration
-RUN update-alternatives --set x-www-browser /usr/bin/firefox && \
-    update-alternatives --set gnome-www-browser /usr/bin/firefox && \
-    # Create proper mime type associations
-    echo "[Added Associations]" > /etc/xfce4/defaults.list && \
-    echo "x-scheme-handler/http=firefox.desktop" >> /etc/xfce4/defaults.list && \
-    echo "x-scheme-handler/https=firefox.desktop" >> /etc/xfce4/defaults.list && \
-    echo "text/html=firefox.desktop" >> /etc/xfce4/defaults.list && \
-    echo "application/xhtml+xml=firefox.desktop" >> /etc/xfce4/defaults.list && \
-    # Configure Firefox to run in headless-friendly mode
-    mkdir -p /root/.mozilla/firefox/default && \
-    echo 'user_pref("browser.tabs.remote.autostart", false);' > /root/.mozilla/firefox/default/prefs.js && \
-    echo 'user_pref("browser.tabs.remote.autostart.2", false);' >> /root/.mozilla/firefox/default/prefs.js && \
-    echo 'user_pref("browser.sessionstore.resume_from_crash", false);' >> /root/.mozilla/firefox/default/prefs.js && \
-    echo 'user_pref("browser.shell.checkDefaultBrowser", false);' >> /root/.mozilla/firefox/default/prefs.js && \
-    echo 'user_pref("browser.startup.homepage", "about:blank");' >> /root/.mozilla/firefox/default/prefs.js
-
-# Create optimized xstartup with memory-saving options and clipboard support
+# Create SIMPLE xstartup
 RUN cat > /root/.vnc/xstartup << 'EOF'
 #!/bin/bash
 unset SESSION_MANAGER
 unset DBUS_SESSION_BUS_ADDRESS
-[ -x /etc/vnc/xstartup ] && exec /etc/vnc/xstartup
-[ -r $HOME/.Xresources ] && xrdb $HOME/.Xresources
-xsetroot -solid grey
-vncconfig -iconic &
-# Start clipboard synchronization for PRIMARY selection
-autocutsel -fork &
-# Start clipboard synchronization for CLIPBOARD selection
-autocutsel -s CLIPBOARD -fork &
-# Disable composite manager to save memory
-xfwm4 --compositor=off &
-# Start with minimal Xfce components
+
+# Start XFCE components
+xfwm4 &
 xfsettingsd --daemon
 xfce4-panel &
 xfdesktop &
-# Set environment variables for proper operation
-export GDK_BACKEND=x11
-export NO_AT_BRIDGE=1
-export MOZ_DISABLE_RDD_SANDBOX=1
-export MOZ_LAYERS_ALLOW_SOFTWARE_GL=1
+
+# Start Thunar file manager in background
+thunar --daemon &
+
+# Set Firefox as default browser
+update-alternatives --set x-www-browser /usr/bin/firefox-esr
+update-alternatives --set gnome-www-browser /usr/bin/firefox-esr
+
+# Launch xfce4-terminal
+xfce4-terminal &
 EOF
 
 RUN chmod +x /root/.vnc/xstartup
 
-# Get noVNC
+# Configure Firefox to work in VNC environment
+RUN mkdir -p /root/.mozilla/firefox-esr/default && \
+    echo 'user_pref("browser.shell.checkDefaultBrowser", false);' > /root/.mozilla/firefox-esr/default/prefs.js && \
+    echo 'user_pref("browser.sessionstore.resume_from_crash", false);' >> /root/.mozilla/firefox-esr/default/prefs.js && \
+    echo 'user_pref("browser.startup.homepage", "about:blank");' >> /root/.mozilla/firefox-esr/default/prefs.js && \
+    echo 'user_pref("browser.tabs.remote.autostart", false);' >> /root/.mozilla/firefox-esr/default/prefs.js && \
+    echo 'user_pref("browser.tabs.remote.autostart.2", false);' >> /root/.mozilla/firefox-esr/default/prefs.js
+
+# Download noVNC
 RUN wget -q https://github.com/novnc/noVNC/archive/refs/tags/v1.4.0.tar.gz -O /tmp/novnc.tar.gz && \
     tar -xzf /tmp/novnc.tar.gz -C /opt/ && \
     mv /opt/noVNC-1.4.0 /opt/novnc && \
@@ -113,74 +101,73 @@ RUN wget -q https://github.com/novnc/noVNC/archive/refs/tags/v1.4.0.tar.gz -O /t
     mv /opt/novnc/utils/websockify-0.11.0 /opt/novnc/utils/websockify && \
     rm /tmp/websockify.tar.gz
 
-# Create cleanup script for periodic memory management
-RUN cat > /cleanup.sh << 'EOF'
-#!/bin/bash
-while true; do
-    # Clean up temporary files
-    find /tmp -type f -atime +1 -delete 2>/dev/null || true
-    find /var/tmp -type f -atime +1 -delete 2>/dev/null || true
-    # Kill any zombie processes
-    ps aux | grep "defunct" | grep -v grep | awk "{print \$2}" | xargs -r kill -9 2>/dev/null || true
-    # Restart clipboard sync if it dies
-    if ! pgrep -x "autocutsel" > /dev/null; then
-        autocutsel -fork &
-        autocutsel -s CLIPBOARD -fork &
-    fi
-    sleep 300
-done
-EOF
+# Copy noVNC HTML files
+RUN cp /opt/novnc/vnc_lite.html /opt/novnc/index.html
 
-RUN chmod +x /cleanup.sh
+# Fix VNC server font path issue
+RUN sed -i 's|^\(.*\$fontPath =\).*$|\1 "";|' /usr/bin/vncserver
 
-# Create a simple browser test script
+# Create browser test script
 RUN cat > /test-browser.sh << 'EOF'
 #!/bin/bash
-echo "Testing browser configuration..."
-# Test if Firefox is accessible
-if command -v firefox &> /dev/null; then
-    echo "✓ Firefox is installed"
-    # Create a simple test HTML file
-    echo '<html><body><h1>Browser Test Page</h1><p>If you see this, browser is working!</p></body></html>' > /tmp/test.html
-    # Test Firefox in headless mode briefly
-    timeout 5 firefox --headless --screenshot /tmp/test.png file:///tmp/test.html 2>/dev/null
-    if [ $? -eq 0 ]; then
-        echo "✓ Firefox can render pages"
-    else
-        echo "⚠ Firefox headless test failed, but GUI may still work"
-    fi
+echo "Testing browser setup..."
+echo "1. Checking Firefox installation..."
+if command -v firefox-esr >/dev/null 2>&1; then
+    echo "   ✓ Firefox ESR installed"
 else
-    echo "✗ Firefox not found"
+    echo "   ✗ Firefox ESR not found"
 fi
-# Check default browser configuration
-if [ "$(update-alternatives --query x-www-browser | grep Value | cut -d' ' -f2)" = "/usr/bin/firefox" ]; then
-    echo "✓ Firefox is set as default browser"
+
+echo "2. Checking default browser..."
+DEFAULT_BROWSER=$(update-alternatives --query x-www-browser | grep "Value:" | cut -d' ' -f2)
+if [ "$DEFAULT_BROWSER" = "/usr/bin/firefox-esr" ]; then
+    echo "   ✓ Firefox ESR is default browser"
 else
-    echo "✗ Firefox is NOT default browser"
+    echo "   ✗ Default browser: $DEFAULT_BROWSER"
 fi
+
+echo "3. Testing Firefox in minimal mode..."
+timeout 5 firefox-esr --headless --screenshot /tmp/test.png https://example.com 2>/dev/null
+if [ $? -eq 0 ]; then
+    echo "   ✓ Firefox can render pages"
+    rm -f /tmp/test.png
+else
+    echo "   ⚠ Firefox headless test failed (GUI may still work)"
+fi
+
+echo "4. Creating desktop launcher..."
+cat > /root/Desktop/firefox.desktop << 'DESKTOP'
+[Desktop Entry]
+Version=1.0
+Name=Firefox Browser
+Comment=Browse the Internet
+Exec=firefox-esr
+Icon=firefox-esr
+Terminal=false
+Type=Application
+Categories=Network;WebBrowser;
+DESKTOP
+chmod +x /root/Desktop/firefox.desktop
+echo "   ✓ Desktop launcher created"
+
+echo ""
+echo "To open browser:"
+echo "1. Double-click Firefox icon on desktop"
+echo "2. Or run in terminal: firefox-esr"
+echo "3. Or press Alt+F2 and type: firefox-esr"
 EOF
 
 RUN chmod +x /test-browser.sh
 
-# Copy noVNC HTML files to serve as health check endpoint
-RUN cp /opt/novnc/vnc_lite.html /opt/novnc/index.html
-
-# Fix the vncserver configuration more carefully
-RUN sed -i '/^\s*\$fontPath\s*=/{s/.*/\$fontPath = "";/}' /usr/bin/vncserver
-
 EXPOSE 10000
 
-# Startup script with clipboard support
+# Startup script
 CMD echo "Starting VNC server..." && \
-    /cleanup.sh & \
-    # Start VNC server
     vncserver :1 -geometry ${VNC_RESOLUTION} -depth ${VNC_DEPTH} && \
-    echo "VNC started successfully on display :1" && \
-    echo "Testing browser configuration..." && \
+    echo "VNC started on :1" && \
+    echo "Testing browser setup..." && \
     /test-browser.sh && \
     echo "Starting noVNC proxy..." && \
-    # Start noVNC proxy
     /opt/novnc/utils/novnc_proxy --vnc localhost:5901 --listen 0.0.0.0:10000 --heartbeat 30 --web /opt/novnc && \
-    echo "noVNC started on port 10000" && \
-    echo "Clipboard sync enabled - use Ctrl+C/Ctrl+V for copy-paste" && \
+    echo "Access at: http://localhost:10000" && \
     tail -f /dev/null

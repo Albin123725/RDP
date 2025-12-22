@@ -8,14 +8,13 @@ ENV HOME=/root
 ENV DISPLAY=:1
 ENV VNC_PASSWD=password123
 ENV VNC_RESOLUTION=1024x576
-# Reduced from 24 to save memory
 ENV VNC_DEPTH=16
 
 # Set timezone
 RUN ln -fs /usr/share/zoneinfo/Asia/Kolkata /etc/localtime && \
     echo "Asia/Kolkata" > /etc/timezone
 
-# Install minimal required packages and clean up aggressively
+# Install packages
 RUN apt update && apt install -y \
     xfce4 \
     xfce4-goodies \
@@ -30,22 +29,15 @@ RUN apt update && apt install -y \
     xfonts-base \
     xfonts-100dpi \
     xfonts-75dpi \
-    --no-install-recommends && \
-    apt clean && \
-    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* && \
-    # Remove unnecessary documentation and locales
-    rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/locale/* && \
-    # Remove Xfce components that aren't essential
-    apt purge -y xfce4-screensaver xfce4-power-manager xscreensaver* && \
-    apt autoremove -y && \
-    apt autoclean
+    && apt clean \
+    && rm -rf /var/lib/apt/lists/*
 
-# Setup VNC password with less memory-intensive settings
+# Setup VNC
 RUN mkdir -p /root/.vnc && \
     printf "${VNC_PASSWD}\n${VNC_PASSWD}\nn\n" | vncpasswd && \
     chmod 600 /root/.vnc/passwd
 
-# Create optimized xstartup with memory-saving options
+# Create xstartup with clipboard support
 RUN cat > /root/.vnc/xstartup << 'EOF'
 #!/bin/bash
 unset SESSION_MANAGER
@@ -53,11 +45,10 @@ unset DBUS_SESSION_BUS_ADDRESS
 [ -x /etc/vnc/xstartup ] && exec /etc/vnc/xstartup
 [ -r $HOME/.Xresources ] && xrdb $HOME/.Xresources
 xsetroot -solid grey
-# Start vncconfig for VNC clipboard support
+# Start vncconfig for VNC clipboard
 vncconfig -nowin &
-# Disable composite manager to save memory
+# Disable composite manager
 xfwm4 --compositor=off &
-# Start with minimal Xfce components
 xfsettingsd --daemon
 xfce4-panel &
 xfdesktop &
@@ -75,112 +66,71 @@ RUN wget -q https://github.com/novnc/noVNC/archive/refs/tags/v1.4.0.tar.gz -O /t
     mv /opt/novnc/utils/websockify-0.11.0 /opt/novnc/utils/websockify && \
     rm /tmp/websockify.tar.gz
 
-# Install clipboard utilities for ALL methods
+# Install CopyQ - Modern clipboard manager with icon
 RUN apt update && apt install -y \
+    copyq \
     xclip \
-    xsel \
-    autocutsel \
     && apt clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Create a comprehensive clipboard sync script
-RUN cat > /start-clipboard.sh << 'EOF'
+# Configure CopyQ to start with icon and enable VNC clipboard
+RUN mkdir -p /root/.config/copyq && \
+    cat > /root/.config/copyq/copyq.conf << 'EOF'
+[General]
+autostart=true
+check_clipboard=true
+check_selection=true
+maxitems=50
+show_tray=true
+tab_names=clipboard
+tray_commands=show
+tray_items=10
+EOF
+
+# Create a simple clipboard sync script
+RUN cat > /usr/local/bin/sync-clipboard << 'EOF'
 #!/bin/bash
-# Wait for X to be ready
-sleep 5
-
-echo "Starting clipboard synchronization..."
-
-# Method 1: autocutsel for X11 clipboard sync
-autocutsel -fork &
-autocutsel -selection PRIMARY -fork &
-
-# Method 2: Continuous sync loop for terminal clipboard
+# Simple clipboard sync for VNC
 while true; do
-    # Sync from CLIPBOARD to PRIMARY (for terminal right-click)
-    xclip -o -selection clipboard 2>/dev/null | xclip -i -selection primary
-    # Sync from PRIMARY to CLIPBOARD
-    xclip -o -selection primary 2>/dev/null | xclip -i -selection clipboard
-    sleep 1
-done &
-EOF
-
-RUN chmod +x /start-clipboard.sh
-
-# Add clipboard support to xstartup
-RUN cat >> /root/.vnc/xstartup << 'EOF'
-
-# Start clipboard synchronization
-/start-clipboard.sh &
-EOF
-
-# Create a test script to verify all clipboard methods
-RUN cat > /test-clipboard-all.sh << 'EOF'
-#!/bin/bash
-echo "=== Testing All Clipboard Methods ==="
-echo ""
-echo "1. Testing Ctrl+C/Ctrl+V (CLIPBOARD):"
-echo "Test text for Ctrl+C/Ctrl+V at $(date)" | xclip -selection clipboard
-echo "Text set to clipboard. Try pasting with Ctrl+V in any application."
-echo ""
-echo "2. Testing middle-click/right-click paste (PRIMARY):"
-echo "Test text for middle-click at $(date)" | xclip -selection primary
-echo "Text set to primary. Try middle-click or right-click -> Paste in terminal."
-echo ""
-echo "3. Testing xclip commands:"
-echo -n "CLIPBOARD contains: " && xclip -o -selection clipboard
-echo -n "PRIMARY contains: " && xclip -o -selection primary
-echo ""
-echo "=== Test Complete ==="
-EOF
-
-RUN chmod +x /test-clipboard-all.sh
-
-# Create cleanup script for periodic memory management
-RUN cat > /cleanup.sh << 'EOF'
-#!/bin/bash
-while true; do
-    # Clean up temporary files
-    find /tmp -type f -atime +1 -delete 2>/dev/null || true
-    find /var/tmp -type f -atime +1 -delete 2>/dev/null || true
-    # Kill any zombie processes
-    ps aux | grep "defunct" | grep -v grep | awk "{print \$2}" | xargs -r kill -9 2>/dev/null || true
-    sleep 300
+    # Keep vncconfig running
+    if ! pgrep -x "vncconfig" > /dev/null; then
+        vncconfig -nowin &
+    fi
+    sleep 5
 done
 EOF
 
-RUN chmod +x /cleanup.sh
+RUN chmod +x /usr/local/bin/sync-clipboard
 
-# Copy noVNC HTML files to serve as health check endpoint
+# Add clipboard startup to xstartup
+RUN cat >> /root/.vnc/xstartup << 'EOF'
+
+# Start CopyQ with icon
+copyq &
+sleep 2
+
+# Start clipboard sync
+/usr/local/bin/sync-clipboard &
+EOF
+
+# Create a test file to verify
+RUN echo "echo 'Clipboard test successful! Copy this text and try to paste.'" > /test-clip.sh && \
+    chmod +x /test-clip.sh
+
+# Copy noVNC HTML files
 RUN cp /opt/novnc/vnc_lite.html /opt/novnc/index.html
 
-# Fix the vncserver configuration more carefully
+# Fix vncserver
 RUN sed -i '/^\s*\$fontPath\s*=/{s/.*/\$fontPath = "";/}' /usr/bin/vncserver
 
 EXPOSE 10000
 
-# Startup script
+# Startup
 CMD echo "Starting VNC server..." && \
-    /cleanup.sh & \
-    # Start VNC server
     vncserver :1 -geometry ${VNC_RESOLUTION} -depth ${VNC_DEPTH} && \
-    echo "VNC started successfully on display :1" && \
-    echo "Starting clipboard synchronization..." && \
-    /start-clipboard.sh & \
-    echo "Starting noVNC proxy..." && \
-    # Start noVNC proxy
+    echo "VNC started on display :1" && \
+    echo "Starting noVNC..." && \
     /opt/novnc/utils/novnc_proxy --vnc localhost:5901 --listen 0.0.0.0:10000 --heartbeat 30 --web /opt/novnc && \
-    echo "noVNC started on port 10000" && \
-    echo "" && \
-    echo "=========================================" && \
-    echo "CLIPBOARD SUPPORT ENABLED FOR ALL METHODS:" && \
-    echo "=========================================" && \
-    echo "1. Ctrl+C (local) → Ctrl+V (VNC) - WORKS" && \
-    echo "2. Ctrl+C (VNC) → Ctrl+V (local) - WORKS" && \
-    echo "3. Right-click → Paste in terminal - WORKS" && \
-    echo "4. Middle-click paste in terminal - WORKS" && \
-    echo "5. Shift+Insert in terminal - WORKS" && \
-    echo "" && \
-    echo "To test: Run /test-clipboard-all.sh in VNC terminal" && \
-    echo "=========================================" && \
+    echo "Ready! CopyQ icon should appear in system tray." && \
+    echo "Test: Run /test-clip.sh in terminal" && \
     tail -f /dev/null

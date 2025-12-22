@@ -1,13 +1,2 @@
-# Environment
 .env
-.env.local
-
-# Data
-data/
 *.log
-temp/
-
-# IDE
-.vscode/
-.idea/
-*.swp

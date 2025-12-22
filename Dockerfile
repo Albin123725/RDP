@@ -14,7 +14,7 @@ ENV VNC_DEPTH=16
 RUN ln -fs /usr/share/zoneinfo/Asia/Kolkata /etc/localtime && \
     echo "Asia/Kolkata" > /etc/timezone
 
-# Install only essential packages
+# Install only essential packages in a single layer
 RUN apt update && apt install -y \
     xfce4 \
     xfce4-terminal \
@@ -28,41 +28,47 @@ RUN apt update && apt install -y \
     wget \
     --no-install-recommends && \
     apt clean && \
-    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* && \
-    # Remove unnecessary components
-    apt purge -y \
-        xfce4-screensaver \
-        xfce4-power-manager \
-        xfce4-taskmanager \
-        xfce4-appfinder \
-        xfce4-clipman \
-        xfce4-notifyd \
-        xfce4-volumed \
-        mousepad \
-        orage \
-        parole \
-        ristretto \
-        thunar-archive-plugin \
-        thunar-media-tags-plugin \
-        xfburn \
-        xfce4-cpufreq-plugin \
-        xfce4-dict \
-        xfce4-mailwatch-plugin \
-        xfce4-netload-plugin \
-        xfce4-notes-plugin \
-        xfce4-places-plugin \
-        xfce4-sensors-plugin \
-        xfce4-smartbookmark-plugin \
-        xfce4-systemload-plugin \
-        xfce4-timer-plugin \
-        xfce4-verve-plugin \
-        xfce4-weather-plugin \
-        xfce4-whiskermenu-plugin \
-        xfce4-wavelan-plugin && \
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+# Remove unnecessary packages and files
+RUN apt purge -y \
+    xfce4-screensaver \
+    xfce4-power-manager \
+    xfce4-taskmanager \
+    xfce4-appfinder \
+    xfce4-clipman \
+    xfce4-notifyd \
+    xfce4-volumed \
+    parole \
+    ristretto \
+    xfburn \
+    xfce4-cpufreq-plugin \
+    xfce4-dict \
+    xfce4-mailwatch-plugin \
+    xfce4-netload-plugin \
+    xfce4-notes-plugin \
+    xfce4-places-plugin \
+    xfce4-sensors-plugin \
+    xfce4-smartbookmark-plugin \
+    xfce4-systemload-plugin \
+    xfce4-timer-plugin \
+    xfce4-verve-plugin \
+    xfce4-weather-plugin \
+    xfce4-whiskermenu-plugin \
+    xfce4-wavelan-plugin \
+    2>/dev/null || true && \
     apt autoremove -y && \
     apt autoclean && \
-    # Remove more unnecessary files
-    rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/locale/* /usr/share/icons/*
+    # Remove unnecessary files
+    rm -rf \
+        /usr/share/doc/* \
+        /usr/share/man/* \
+        /usr/share/locale/* \
+        /usr/share/icons/* \
+        /usr/share/backgrounds/* \
+        /usr/share/applications/xfce4-about.desktop \
+        /usr/share/applications/xfce4-mail-reader.desktop \
+        /usr/share/applications/xfce4-web-browser.desktop
 
 # Setup VNC
 RUN mkdir -p /root/.vnc && \
@@ -104,30 +110,18 @@ user_pref("app.update.enabled", false);
 user_pref("browser.shell.checkDefaultBrowser", false);
 user_pref("datareporting.healthreport.uploadEnabled", false);
 user_pref("datareporting.policy.dataSubmissionEnabled", false);
-user_pref("devtools.onboarding.telemetry.logged", false);
-user_pref("toolkit.telemetry.archive.enabled", false);
-user_pref("toolkit.telemetry.bhrPing.enabled", false);
-user_pref("toolkit.telemetry.enabled", false);
-user_pref("toolkit.telemetry.firstShutdownPing.enabled", false);
-user_pref("toolkit.telemetry.hybridContent.enabled", false);
-user_pref("toolkit.telemetry.newProfilePing.enabled", false);
-user_pref("toolkit.telemetry.reportingpolicy.firstRun", false);
-user_pref("toolkit.telemetry.shutdownPingSender.enabled", false);
-user_pref("toolkit.telemetry.unified", false);
-user_pref("toolkit.telemetry.updatePing.enabled", false);
 
 // Performance optimizations
 user_pref("browser.cache.disk.enable", false);
 user_pref("browser.cache.memory.enable", true);
 user_pref("browser.sessionhistory.max_total_viewers", 0);
-user_pref("browser.sessionstore.interval", 60000);
 user_pref("browser.startup.page", 0);
-user_pref("browser.tabs.animate", false);
-user_pref("browser.urlbar.suggest.searches", false);
 user_pref("dom.ipc.processCount", 1);
 user_pref("extensions.pocket.enabled", false);
 user_pref("gfx.canvas.accelerated", false);
 user_pref("gfx.webrender.all", false);
+// Disable WebGL to save memory
+user_pref("webgl.disabled", true);
 EOF
 
 # Copy noVNC HTML files for health check
@@ -136,11 +130,21 @@ RUN cp /opt/novnc/vnc_lite.html /opt/novnc/index.html
 # Fix vncserver font path issue
 RUN sed -i 's/^.*\$fontPath.*=.*/\$fontPath = "";/' /usr/bin/vncserver
 
+# Create a simple script to fix VNC startup
+RUN cat > /start-vnc.sh << 'EOF'
+#!/bin/bash
+# Start VNC server
+vncserver :1 -geometry ${VNC_RESOLUTION} -depth ${VNC_DEPTH}
+
+# Start noVNC
+/opt/novnc/utils/novnc_proxy --vnc localhost:5901 --listen 0.0.0.0:10000 --heartbeat 30 --web /opt/novnc &
+
+# Keep container running
+tail -f /dev/null
+EOF
+
+RUN chmod +x /start-vnc.sh
+
 EXPOSE 10000
 
-# Simple startup script
-CMD echo "Starting VNC server..." && \
-    vncserver :1 -geometry ${VNC_RESOLUTION} -depth ${VNC_DEPTH} && \
-    echo "VNC started successfully" && \
-    echo "Starting noVNC proxy..." && \
-    /opt/novnc/utils/novnc_proxy --vnc localhost:5901 --listen 0.0.0.0:10000 --heartbeat 30 --web /opt/novnc
+CMD /start-vnc.sh

@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  xfce-vnc:
+    build: .
+    ports:
+      - "5901:5901"
+      - "6080:6080"
+    environment:
+      - VNC_PASSWORD=${VNC_PASSWORD:-password123}
+      - RESOLUTION=${RESOLUTION:-1920x1080}
+      - DISPLAY=:1
+    volumes:
+      - ./data:/root
+    restart: unless-stopped

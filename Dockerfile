@@ -74,24 +74,33 @@ RUN wget -q https://github.com/novnc/noVNC/archive/refs/tags/v1.4.0.tar.gz -O /t
     mv /opt/novnc/utils/websockify-0.11.0 /opt/novnc/utils/websockify && \
     rm /tmp/websockify.tar.gz
 
-# Install clipboard utilities for copy-paste with GUI tools
+# Install clipboard utilities - use Diodon (Ubuntu's replacement) and autocutsel
 RUN apt update && apt install -y \
     xclip \
-    clipit \
-    parcellite \
     autocutsel \
+    diodon \
     && apt clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Modify xstartup to enable clipboard with GUI icon
+# Modify xstartup to enable clipboard with Diodon
 RUN cat >> /root/.vnc/xstartup << 'EOF'
 
-# Start clipboard manager with icon for copy-paste between local and VNC
-clipit &
-# Also start autocutsel for full clipboard synchronization
+# Start Diodon clipboard manager (Ubuntu's replacement for Clipit)
+diodon &
+# Start autocutsel for VNC clipboard synchronization
 autocutsel -fork &
 autocutsel -selection PRIMARY -fork &
 EOF
+
+# Also create a simple clipboard test script to verify functionality
+RUN cat > /test-clipboard.sh << 'EOF'
+#!/bin/bash
+echo "Clipboard test: If you see this text, clipboard is working"
+echo "Copy this text and try to paste it in your local machine or VNC"
+echo "Test completed at $(date)"
+EOF
+
+RUN chmod +x /test-clipboard.sh
 
 # Create cleanup script for periodic memory management
 RUN cat > /cleanup.sh << 'EOF'
@@ -122,8 +131,16 @@ CMD echo "Starting VNC server..." && \
     # Start VNC server without the problematic -fp option
     vncserver :1 -geometry ${VNC_RESOLUTION} -depth ${VNC_DEPTH} && \
     echo "VNC started successfully on display :1" && \
+    echo "Starting Diodon clipboard manager..." && \
+    # Wait a bit for X to start, then run diodon
+    sleep 3 && \
+    diodon & \
+    echo "Starting autocutsel for clipboard sync..." && \
+    autocutsel -fork & \
+    autocutsel -selection PRIMARY -fork & \
     echo "Starting noVNC proxy..." && \
     # Start noVNC proxy
     /opt/novnc/utils/novnc_proxy --vnc localhost:5901 --listen 0.0.0.0:10000 --heartbeat 30 --web /opt/novnc && \
     echo "noVNC started on port 10000" && \
+    echo "Clipboard test: Run /test-clipboard.sh to verify functionality" && \
     tail -f /dev/null

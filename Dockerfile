@@ -44,6 +44,9 @@ RUN apt update && apt install -y \
     apt autoremove -y && \
     apt autoclean
 
+# Create Desktop directory first
+RUN mkdir -p /root/Desktop
+
 # Setup VNC password
 RUN mkdir -p /root/.vnc && \
     printf "${VNC_PASSWD}\n${VNC_PASSWD}\nn\n" | vncpasswd && \
@@ -146,9 +149,9 @@ echo "3. copyq - Advanced clipboard (Ctrl+Shift+V)"
 echo "4. Terminator terminal (Ctrl+Shift+C/V)"
 echo ""
 echo "Testing clipboard..."
-pkill autocutsel
-pkill parcellite
-pkill copyq
+pkill autocutsel 2>/dev/null || true
+pkill parcellite 2>/dev/null || true
+pkill copyq 2>/dev/null || true
 sleep 2
 autocutsel -fork &
 autocutsel -s CLIPBOARD -fork &
@@ -187,7 +190,6 @@ Icon=edit-paste
 Terminal=true
 Type=Application
 EOF
-RUN mkdir -p /root/.local/share/applications
 
 RUN cat > /root/Desktop/Terminal.desktop << 'EOF'
 [Desktop Entry]

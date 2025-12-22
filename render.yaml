@@ -5,9 +5,13 @@ services:
     dockerfilePath: ./Dockerfile
     plan: free
     autoDeploy: true
-    port: 8080
+    healthCheckPath: /vnc_lite.html
     envVars:
-      - key: DISPLAY
-        value: :1
-      - key: USER
-        value: root
+      - key: VNC_PASSWD
+        value: "Albin"
+      - key: VNC_RESOLUTION
+        value: "1024x576"
+      - key: VNC_DEPTH
+        value: "16"
+    resources:
+      memoryMB: 512

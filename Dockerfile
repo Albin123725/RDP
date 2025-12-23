@@ -33,14 +33,16 @@ RUN apt update && apt install -y \
     apt clean && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-# Install noVNC from source
+# Install noVNC properly - using the websockify package
 RUN wget -q https://github.com/novnc/noVNC/archive/refs/tags/v1.4.0.tar.gz -O /tmp/novnc.tar.gz && \
     tar -xzf /tmp/novnc.tar.gz -C /opt/ && \
     mv /opt/noVNC-1.4.0 /opt/novnc && \
-    rm /tmp/novnc.tar.gz && \
-    wget -q https://github.com/novnc/websockify/archive/refs/tags/v0.11.0.tar.gz -O /tmp/websockify.tar.gz && \
-    tar -xzf /tmp/websockify.tar.gz -C /opt/novnc/utils/ && \
-    mv /opt/novnc/utils/websockify-0.11.0 /opt/novnc/utils/websockify && \
+    rm /tmp/novnc.tar.gz
+
+# Install websockify separately
+RUN wget -q https://github.com/novnc/websockify/archive/refs/tags/v0.11.0.tar.gz -O /tmp/websockify.tar.gz && \
+    tar -xzf /tmp/websockify.tar.gz -C /opt/ && \
+    mv /opt/websockify-0.11.0 /opt/websockify && \
     rm /tmp/websockify.tar.gz
 
 # Create VNC password file
@@ -57,7 +59,7 @@ user_pref("browser.startup.page", 0);
 user_pref("dom.ipc.processCount", 1);
 EOF
 
-# Create fluxbox menu with our apps
+# Create fluxbox menu
 RUN mkdir -p /root/.fluxbox && \
     cat > /root/.fluxbox/menu << 'EOF'
 [begin] (Applications)
@@ -72,50 +74,63 @@ EOF
 # Copy noVNC HTML files
 RUN cp /opt/novnc/vnc_lite.html /opt/novnc/index.html
 
+# Create a simple Python script to run websockify
+RUN cat > /opt/novnc/start-novnc.py << 'EOF'
+#!/usr/bin/env python3
+import sys
+import os
+sys.path.insert(0, '/opt/websockify')
+from websockify.websocketproxy import WebSocketProxy
+
+if __name__ == '__main__':
+    sys.argv = ['websockify', '--web', '/opt/novnc', '0.0.0.0:10000', 'localhost:5901']
+    WebSocketProxy().start_server()
+EOF
+
+RUN chmod +x /opt/novnc/start-novnc.py
+
 # Create startup script
 RUN cat > /start.sh << 'EOF'
 #!/bin/bash
 
-# Kill any existing processes on port 5901 and 10000
-fuser -k 5901/tcp 2>/dev/null || true
-fuser -k 10000/tcp 2>/dev/null || true
+# Kill any existing processes
+pkill -f "x11vnc" 2>/dev/null || true
+pkill -f "Xvfb" 2>/dev/null || true
+pkill -f "websockify" 2>/dev/null || true
+pkill -f "fluxbox" 2>/dev/null || true
+pkill -f "start-novnc" 2>/dev/null || true
 
 # Set DISPLAY variable
 export DISPLAY=:99
 
-# Start Xvfb (virtual framebuffer)
+# Start Xvfb
 echo "Starting Xvfb on display :99"
 Xvfb :99 -screen 0 ${VNC_RESOLUTION}x${VNC_DEPTH} &
-XVFB_PID=$!
 
 # Wait for Xvfb to start
 sleep 3
 
-# Start fluxbox (lightweight window manager)
+# Start fluxbox
 echo "Starting Fluxbox"
-startfluxbox &
-FLUXBOX_PID=$!
+fluxbox &
 
 # Start applications
 echo "Starting applications"
 sleep 2
 xterm -geometry 80x24+10+10 &
-sleep 1
 thunar &
-sleep 1
 firefox &
 
 # Start x11vnc
 echo "Starting x11vnc server on port 5901"
 x11vnc -display :99 -forever -shared -rfbauth /root/.vnc/passwd -bg -rfbport 5901 -noxdamage -nowf -noscr -cursor arrow
 
-# Start noVNC with explicit Python 3
+# Start noVNC using our Python script
 echo "Starting noVNC on port 10000"
-cd /opt/novnc/utils/websockify
-python3 run --vnc localhost:5901 --listen 0.0.0.0:10000 --web /opt/novnc &
-NOVNC_PID=$!
+cd /opt/novnc
+python3 start-novnc.py &
 
-# Wait for noVNC to start
+# Wait a bit
 sleep 3
 
 echo "=========================================="
@@ -124,24 +139,8 @@ echo "Access at: https://${RENDER_EXTERNAL_HOSTNAME:-localhost}/vnc_lite.html"
 echo "Password: $VNC_PASSWD"
 echo "=========================================="
 
-# Keep container running and monitor processes
-while true; do
-    # Check if noVNC is running
-    if ! ps -p $NOVNC_PID > /dev/null 2>&1; then
-        echo "noVNC died, restarting..."
-        cd /opt/novnc/utils/websockify
-        python3 run --vnc localhost:5901 --listen 0.0.0.0:10000 --web /opt/novnc &
-        NOVNC_PID=$!
-    fi
-    
-    # Check if x11vnc is running
-    if ! pgrep -x "x11vnc" > /dev/null; then
-        echo "x11vnc died, restarting..."
-        x11vnc -display :99 -forever -shared -rfbauth /root/.vnc/passwd -bg -rfbport 5901 -noxdamage -nowf -noscr -cursor arrow
-    fi
-    
-    sleep 10
-done
+# Keep container running
+tail -f /dev/null
 EOF
 
 RUN chmod +x /start.sh

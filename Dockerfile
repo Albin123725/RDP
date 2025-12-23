@@ -81,60 +81,114 @@ RUN mkdir -p /opt/novnc/utils/websockify && \
         -subj "/C=US/ST=State/L=City/O=Organization/CN=localhost" && \
     chmod 600 self.pem
 
-# Create PROPER index.html that connects to SAME PORT (8080)
+# Create ULTIMATE FIX index.html
 RUN cat > /opt/novnc/index.html << 'EOF'
 <!DOCTYPE html>
 <html>
 <head>
-    <title>VNC Desktop - Ready</title>
+    <title>VNC Desktop</title>
     <meta charset="utf-8">
     <script src="app/ui.js"></script>
     <script>
     window.addEventListener('load', function() {
-        console.log("Page loaded, attempting to connect...");
+        console.log("VNC Desktop Loaded");
         
-        // Get current host (no port needed - Render will route to 8080)
-        const host = window.location.hostname;
+        // Get current URL
+        const url = window.location;
+        const host = url.hostname;
+        const protocol = url.protocol;
         
-        // On Render, WebSocket is on SAME PORT as HTTP (8080)
-        // Use empty string for port to use same port as page
-        // Path is 'websockify' which is the WebSocket endpoint
+        // Determine WebSocket protocol (ws:// or wss://)
+        const wsProtocol = protocol === 'https:' ? 'wss://' : 'ws://';
         
-        console.log("Auto-connecting to WebSocket on same port...");
+        // On Render, we need to connect to /websockify path
+        console.log("Protocol:", protocol, "WebSocket Protocol:", wsProtocol);
+        console.log("Host:", host);
         
-        // Auto-connect with no port specified (uses same port as page)
+        // Try connecting - Render will route to port 8080 internally
+        // The path MUST be 'websockify' (no slash at beginning)
         setTimeout(function() {
+            console.log("Attempting to connect...");
             UI.connect(host, '', 'password123', 'websockify');
-        }, 500);
+        }, 1000);
+        
+        // Alternative method after 3 seconds
+        setTimeout(function() {
+            if (!window.connected) {
+                console.log("Trying alternative connection method...");
+                // Try with explicit path
+                UI.connect(host, '8080', 'password123', 'websockify');
+            }
+        }, 3000);
+    });
+    
+    // Track connection status
+    window.connected = false;
+    window.addEventListener('UIConnected', function() {
+        console.log("CONNECTED!");
+        window.connected = true;
+        document.getElementById('status').style.display = 'none';
     });
     </script>
     <style>
         body { margin: 0; padding: 0; background: #2d2d2d; color: white; font-family: Arial; }
         #status { 
-            position: fixed; top: 20px; left: 20px; right: 20px;
-            background: #333; padding: 15px; border-radius: 5px; 
-            text-align: center; z-index: 1000;
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.9); 
+            display: flex; flex-direction: column;
+            justify-content: center; align-items: center;
+            z-index: 1000;
         }
         #connect_btn {
             background: #4CAF50; color: white; border: none;
-            padding: 10px 20px; margin: 10px; border-radius: 4px;
-            cursor: pointer; font-size: 16px;
+            padding: 15px 30px; margin: 20px; border-radius: 4px;
+            cursor: pointer; font-size: 18px; font-weight: bold;
         }
+        .info { margin: 10px; color: #ccc; }
         #noVNC_screen { width: 100vw; height: 100vh; }
     </style>
 </head>
 <body>
     <div id="status">
-        VNC Desktop Ready 
-        <button id="connect_btn" onclick="location.reload()">Retry Connection</button>
-        <div id="connection_info"></div>
+        <h1>🖥️ VNC Desktop</h1>
+        <div class="info">Host: rdp-00jy.onrender.com</div>
+        <div class="info">Password: password123</div>
+        <div class="info" id="connection_status">Connecting to WebSocket...</div>
+        <button id="connect_btn" onclick="connectManual()">Click to Connect</button>
+        <div class="info" style="margin-top: 30px; font-size: 12px;">
+            If stuck, try: <a href="/vnc_lite.html" style="color: #4CAF50;">/vnc_lite.html</a>
+        </div>
     </div>
     <div id="noVNC_screen"></div>
     
     <script>
-    // Show connection info
-    document.getElementById('connection_info').innerHTML = 
-        'Host: ' + window.location.hostname + ' | Port: ' + (window.location.port || '80/443');
+    function connectManual() {
+        console.log("Manual connect attempt...");
+        const host = window.location.hostname;
+        
+        // Try multiple connection methods
+        try {
+            UI.connect(host, '', 'password123', 'websockify');
+        } catch(e) {
+            console.log("Method 1 failed:", e);
+            try {
+                UI.connect(host, '8080', 'password123', 'websockify');
+            } catch(e2) {
+                console.log("Method 2 failed:", e2);
+                alert("Connection failed. Check browser console (F12) for errors.");
+            }
+        }
+    }
+    
+    // Update status
+    setInterval(function() {
+        const elem = document.getElementById('connection_status');
+        if (window.connected) {
+            elem.innerHTML = "✅ CONNECTED! Desktop should be visible.";
+        } else {
+            elem.innerHTML = "Attempting WebSocket connection... " + new Date().toLocaleTimeString();
+        }
+    }, 1000);
     </script>
 </body>
 </html>
@@ -193,11 +247,11 @@ echo "3. Starting x11vnc on port 5901"
 x11vnc -display :99 -forever -shared -rfbauth /root/.vnc/passwd -rfbport 5901 -bg
 sleep 2
 
-# CRITICAL: Start websockify on PORT 8080 (not 10000)
+# CRITICAL: Start websockify on PORT 8080 (not 10000) with VERBOSE logging
 echo "4. Starting websockify WITH SSL on port 8080"
 cd /opt/novnc/utils/websockify
-# Use --web for serving HTML, --cert for SSL, port 8080 for WebSocket
-python3 -m websockify --web /opt/novnc --cert ./self.pem 0.0.0.0:8080 localhost:5901 &
+# Use --web for serving HTML, --cert for SSL, port 8080 for WebSocket, --verbose for debugging
+python3 -m websockify --web /opt/novnc --cert ./self.pem --verbose 0.0.0.0:8080 localhost:5901 2>&1 | tee /var/log/websockify.log &
 sleep 3
 
 # Verification
@@ -219,8 +273,10 @@ echo ""
 echo "Password: $VNC_PASSWD"
 echo ""
 echo "=== TROUBLESHOOTING ==="
-echo "If still 'Connecting...', open browser console (F12)"
-echo "Look for WebSocket connection errors"
+echo "If still 'Connecting...':"
+echo "1. Open browser console (F12 → Console)"
+echo "2. Check for WebSocket errors"
+echo "3. Try direct VNC: rdp-00jy.onrender.com:5901 (password: $VNC_PASSWD)"
 echo "========================================="
 
 # Keep container alive

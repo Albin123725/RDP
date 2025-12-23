@@ -1,11 +1,9 @@
 services:
   - type: web
-    name: modern-browser
+    name: lightweight-browser
     env: python
     plan: free
-    buildCommand: |
-      pip install -r requirements.txt
-      python -m playwright install chromium --with-deps
+    buildCommand: pip install -r requirements.txt
     startCommand: python app.py
     envVars:
       - key: PORT

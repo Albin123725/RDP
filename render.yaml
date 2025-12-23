@@ -11,5 +11,7 @@ services:
         value: "1024x576"
       - key: VNC_DEPTH
         value: "16"
+      - key: VNC_PASSWD
+        value: "password123"
     resources:
       memoryMB: 512

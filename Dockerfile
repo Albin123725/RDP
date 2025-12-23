@@ -1,9 +1,10 @@
 FROM python:3.9-slim
 
-# Install system dependencies
+# Install system dependencies including Chrome
 RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
+    ca-certificates \
     unzip \
     fonts-liberation \
     libasound2 \
@@ -33,17 +34,16 @@ RUN apt-get update && apt-get install -y \
     xvfb \
     --no-install-recommends
 
-# Install Chrome
-RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
-    && echo "deb http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list \
-    && apt-get update \
-    && apt-get install -y google-chrome-stable \
-    && rm -rf /var/lib/apt/lists/*
+# Install Chrome using the new method
+RUN wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
+    && apt-get install -y /tmp/chrome.deb \
+    && rm /tmp/chrome.deb
 
 # Install ChromeDriver
-RUN wget -q https://storage.googleapis.com/chrome-for-testing-public/119.0.6045.105/linux64/chromedriver-linux64.zip \
+RUN wget -q https://edgedl.me.gvt1.com/edgedl/chrome/chrome-for-testing/119.0.6045.105/linux64/chromedriver-linux64.zip \
     && unzip chromedriver-linux64.zip \
-    && mv chromedriver-linux64/chromedriver /usr/local/bin/ \
+    && mv chromedriver-linux64/chromedriver /usr/local/bin/chromedriver \
+    && chmod +x /usr/local/bin/chromedriver \
     && rm -rf chromedriver-linux64.zip chromedriver-linux64
 
 # Install Python dependencies
@@ -51,12 +51,11 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy only the Python file
+# Copy application
 COPY app.py .
 
 # Create non-root user
-RUN useradd -m -u 1000 browseruser
-RUN chown -R browseruser:browseruser /app
+RUN useradd -m -u 1000 browseruser && chown -R browseruser:browseruser /app
 USER browseruser
 
 # Expose port

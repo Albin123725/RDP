@@ -14,7 +14,7 @@ ENV VNC_DEPTH=16
 RUN ln -fs /usr/share/zoneinfo/Asia/Kolkata /etc/localtime && \
     echo "Asia/Kolkata" > /etc/timezone
 
-# Install packages - add a few missing ones
+# Install packages
 RUN apt update && apt install -y \
     fluxbox \
     xterm \
@@ -29,7 +29,6 @@ RUN apt update && apt install -y \
     python3 \
     python3-numpy \
     dbus-x11 \
-    xmessage \
     --no-install-recommends && \
     apt clean && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
@@ -72,13 +71,10 @@ RUN mkdir -p /root/.fluxbox && \
 [end]
 EOF
 
-# Create simple fluxbox startup file
+# Create simple fluxbox startup file without fbsetbg
 RUN cat > /root/.fluxbox/startup << 'EOF'
 #!/bin/sh
 # fluxbox startup script
-
-# Set background color
-fbsetbg -solid "#2d2d2d"
 
 # Start applications
 xterm -geometry 80x24+10+10 &
@@ -173,7 +169,7 @@ echo "=========================================="
 echo "Services running:"
 echo "- Xvfb (PID: $XVFB_PID)"
 echo "- Fluxbox (PID: $FLUXBOX_PID)" 
-echo "- x11vnc (PID: $X11VNC_PID)"
+echo "- x11vnc"
 echo "- noVNC (PID: $NOVNC_PID)"
 
 # Keep running

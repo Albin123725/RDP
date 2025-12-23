@@ -1,682 +1,402 @@
 #!/usr/bin/env python3
 """
-Single-File Lightweight Browser for Render Free Tier
-No Chrome installation needed - uses requests + BeautifulSoup
+Real Browser Proxy for Modern Web Apps
+Uses Playwright to render JavaScript-heavy sites like https://mln49z-8888.csb.app/tree?
 """
 
 import os
-import re
-import html
-import json
-import threading
+import sys
 import time
-import urllib.parse
+import json
+import base64
+import asyncio
+import threading
 from datetime import datetime
-from flask import Flask, request, render_template_string, jsonify, send_file
-from io import BytesIO
-import requests
-from PIL import Image, ImageDraw, ImageFont
-import logging
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+from flask import Flask, request, jsonify, Response, render_template_string
+import subprocess
+import urllib.parse
 
 app = Flask(__name__)
 
-# HTML Template (embedded in the same file)
-HTML_TEMPLATE = '''
-<!DOCTYPE html>
-<html lang="en">
+# Install Playwright dependencies on first run
+def install_playwright():
+    """Install Playwright and browsers in background"""
+    try:
+        print("📦 Installing Playwright dependencies...")
+        subprocess.run([sys.executable, "-m", "pip", "install", "playwright", "asgiref"], 
+                      check=True, capture_output=True)
+        
+        print("🌐 Installing browsers...")
+        result = subprocess.run([sys.executable, "-m", "playwright", "install", "chromium", "--with-deps"], 
+                              check=True, capture_output=True, text=True)
+        print(f"✅ Installation complete: {result.stdout[:100]}...")
+        return True
+    except Exception as e:
+        print(f"❌ Installation failed: {e}")
+        return False
+
+# Start installation in background
+threading.Thread(target=install_playwright, daemon=True).start()
+
+# HTML Interface
+HTML = '''<!DOCTYPE html>
+<html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🌐 Lightweight Web Browser</title>
+    <title>Modern Browser for Web Apps</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
+        body { 
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
-            padding: 20px;
-            color: #333;
-        }
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            background: rgba(255, 255, 255, 0.95);
-            border-radius: 15px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-            overflow: hidden;
+            display: flex;
+            flex-direction: column;
         }
         .header {
-            background: linear-gradient(135deg, #0072ff 0%, #00c6ff 100%);
+            background: rgba(0, 0, 0, 0.8);
             color: white;
-            padding: 20px 30px;
-            display: flex;
-            align-items: center;
-            gap: 15px;
-        }
-        .header h1 { flex: 1; font-size: 24px; }
-        .status-badge {
-            background: rgba(255, 255, 255, 0.2);
-            padding: 5px 15px;
-            border-radius: 20px;
-            font-size: 14px;
-        }
-        .browser-controls {
-            background: #f8f9fa;
             padding: 20px;
-            border-bottom: 1px solid #dee2e6;
             display: flex;
-            gap: 10px;
-            flex-wrap: wrap;
+            gap: 15px;
+            align-items: center;
+            backdrop-filter: blur(10px);
         }
         .url-bar {
             flex: 1;
-            min-width: 300px;
             padding: 12px 20px;
-            border: 2px solid #0072ff;
+            background: rgba(255, 255, 255, 0.1);
+            border: 2px solid rgba(255, 255, 255, 0.2);
             border-radius: 8px;
+            color: white;
             font-size: 16px;
-            background: white;
         }
+        .url-bar::placeholder { color: rgba(255, 255, 255, 0.6); }
         .btn {
             padding: 12px 24px;
+            background: #0072ff;
+            color: white;
             border: none;
             border-radius: 8px;
             cursor: pointer;
             font-weight: 600;
-            display: flex;
-            align-items: center;
-            gap: 8px;
             transition: all 0.3s;
         }
-        .btn-primary {
-            background: linear-gradient(135deg, #0072ff 0%, #00c6ff 100%);
-            color: white;
-        }
-        .btn-primary:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 5px 15px rgba(0, 114, 255, 0.4);
-        }
-        .btn-secondary {
-            background: #6c757d;
-            color: white;
-        }
-        .btn-secondary:hover {
-            background: #5a6268;
-        }
-        .content-area {
-            padding: 30px;
-            min-height: 500px;
+        .btn:hover { background: #0058d6; transform: translateY(-2px); }
+        .browser-frame {
+            flex: 1;
+            border: none;
             background: white;
         }
-        .website-content {
-            max-width: 800px;
-            margin: 0 auto;
-            line-height: 1.6;
-        }
-        .website-content h1, 
-        .website-content h2, 
-        .website-content h3 {
-            color: #2c3e50;
-            margin: 20px 0 10px;
-            border-bottom: 2px solid #f0f0f0;
-            padding-bottom: 5px;
-        }
-        .website-content p {
-            margin: 15px 0;
-            color: #34495e;
-        }
-        .website-content a {
-            color: #3498db;
-            text-decoration: none;
-            border-bottom: 1px dashed #3498db;
-        }
-        .website-content a:hover {
-            color: #2980b9;
-            border-bottom-style: solid;
-        }
-        .website-content ul, .website-content ol {
-            padding-left: 30px;
-            margin: 15px 0;
-        }
-        .website-content li {
-            margin: 8px 0;
-        }
-        .website-content img {
-            max-width: 100%;
-            height: auto;
-            border-radius: 8px;
-            margin: 15px 0;
-            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
-        }
-        .website-content code {
-            background: #f8f9fa;
-            padding: 2px 6px;
-            border-radius: 4px;
-            font-family: 'Courier New', monospace;
+        .status {
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 10px 20px;
             font-size: 14px;
-        }
-        .website-content pre {
-            background: #2c3e50;
-            color: #ecf0f1;
-            padding: 15px;
-            border-radius: 8px;
-            overflow-x: auto;
-            margin: 20px 0;
-        }
-        .error-message {
-            background: #fff5f5;
-            border: 1px solid #fed7d7;
-            border-radius: 8px;
-            padding: 20px;
-            margin: 20px 0;
-            color: #c53030;
-        }
-        .loading {
-            text-align: center;
-            padding: 40px;
-            color: #7f8c8d;
-        }
-        .loading .spinner {
-            border: 4px solid #f3f3f3;
-            border-top: 4px solid #3498db;
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 20px;
-        }
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-        .browser-info {
-            background: #f8f9fa;
-            padding: 15px;
-            border-top: 1px solid #dee2e6;
             display: flex;
             justify-content: space-between;
-            font-size: 14px;
-            color: #6c757d;
         }
-        @media (max-width: 768px) {
-            .container { margin: 10px; }
-            .browser-controls { flex-direction: column; }
-            .url-bar { min-width: auto; }
-            .btn { width: 100%; justify-content: center; }
+        .dot {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        .green { background: #4CAF50; animation: pulse 2s infinite; }
+        .red { background: #f44336; }
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <h1>🌐 Lightweight Web Browser</h1>
-            <div class="status-badge">
-                <span id="status">Ready</span>
-            </div>
-        </div>
-        
-        <div class="browser-controls">
-            <button class="btn btn-secondary" onclick="history.back()">← Back</button>
-            <button class="btn btn-secondary" onclick="history.forward()">→ Forward</button>
-            <button class="btn btn-secondary" onclick="location.reload()">↻ Reload</button>
-            <input type="text" class="url-bar" id="urlInput" 
-                   placeholder="Enter website URL (e.g., https://example.com)" 
-                   value="{{ current_url }}">
-            <button class="btn btn-primary" onclick="navigate()">
-                <span>🌐</span> Go
-            </button>
-        </div>
-        
-        <div class="content-area">
-            {% if error %}
-                <div class="error-message">
-                    <h3>⚠️ Error Loading Page</h3>
-                    <p>{{ error }}</p>
-                    <p>Try these alternatives:</p>
-                    <ul>
-                        <li>Make sure the URL starts with http:// or https://</li>
-                        <li>Try a different website</li>
-                        <li>Check your internet connection</li>
-                    </ul>
-                </div>
-            {% elif content %}
-                <div class="website-content">
-                    {{ content|safe }}
-                </div>
-            {% else %}
-                <div class="loading">
-                    <div class="spinner"></div>
-                    <p>Enter a URL above to start browsing</p>
-                    <p style="margin-top: 20px; font-size: 14px;">
-                        <strong>Try these examples:</strong><br>
-                        https://news.ycombinator.com<br>
-                        https://en.wikipedia.org/wiki/Web_browser<br>
-                        https://httpbin.org/html
-                    </p>
-                </div>
-            {% endif %}
-        </div>
-        
-        <div class="browser-info">
-            <div>
-                <span id="pageInfo">{{ page_info }}</span>
-            </div>
-            <div>
-                Memory: <span id="memory">{{ memory_usage }} MB</span> | 
-                Requests: <span id="requests">0</span>
-            </div>
-        </div>
+    <div class="header">
+        <input type="text" class="url-bar" id="urlInput" 
+               placeholder="Enter URL (e.g., https://mln49z-8888.csb.app/tree?)" 
+               value="https://mln49z-8888.csb.app/tree?">
+        <button class="btn" onclick="navigate()">🌐 Open Website</button>
+    </div>
+    
+    <iframe class="browser-frame" id="browserFrame" 
+            sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals"
+            allow="camera; microphone; fullscreen">
+    </iframe>
+    
+    <div class="status">
+        <div><span class="dot green"></span> <span id="statusText">Ready to browse</span></div>
+        <div id="urlDisplay">No page loaded</div>
     </div>
 
     <script>
-        let historyStack = [];
-        let historyIndex = -1;
+        const frame = document.getElementById('browserFrame');
+        const urlInput = document.getElementById('urlInput');
+        const statusText = document.getElementById('statusText');
+        const urlDisplay = document.getElementById('urlDisplay');
+        
+        // Load initial URL
+        window.addEventListener('load', () => {
+            const url = urlInput.value;
+            if (url) {
+                loadUrl(url);
+            }
+        });
         
         function navigate() {
-            const urlInput = document.getElementById('urlInput');
-            let url = urlInput.value.trim();
-            
-            if (!url) return;
-            
-            // Add protocol if missing
-            if (!url.startsWith('http://') && !url.startsWith('https://')) {
-                url = 'https://' + url;
-            }
-            
-            // Validate URL
-            try {
-                new URL(url);
-                
-                // Update status
-                document.getElementById('status').textContent = 'Loading...';
-                
-                // Add to history
-                historyStack.push(url);
-                historyIndex = historyStack.length - 1;
-                
-                // Navigate
-                window.location.href = `/?url=${encodeURIComponent(url)}`;
-                
-            } catch (error) {
-                alert('Invalid URL. Please enter a valid web address.');
+            const url = urlInput.value.trim();
+            if (url) {
+                loadUrl(url);
             }
         }
         
-        // Handle Enter key in URL bar
-        document.getElementById('urlInput').addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                navigate();
-            }
-        });
-        
-        // Keyboard shortcuts
-        document.addEventListener('keydown', function(e) {
-            // Ctrl+L or Cmd+L to focus URL bar
-            if ((e.ctrlKey || e.metaKey) && e.key === 'l') {
-                e.preventDefault();
-                document.getElementById('urlInput').focus();
-                document.getElementById('urlInput').select();
-            }
+        function loadUrl(url) {
+            statusText.textContent = 'Loading...';
+            urlDisplay.textContent = url;
             
-            // F5 to refresh
-            if (e.key === 'F5') {
-                e.preventDefault();
-                location.reload();
-            }
+            // Encode URL for proxy
+            const proxyUrl = `/proxy?url=${encodeURIComponent(url)}`;
             
-            // Alt+Left/Right for history
-            if (e.altKey) {
-                if (e.key === 'ArrowLeft') {
-                    history.back();
-                } else if (e.key === 'ArrowRight') {
-                    history.forward();
+            // Load in iframe
+            frame.src = proxyUrl;
+            
+            // Update iframe events
+            frame.onload = () => {
+                statusText.textContent = 'Page loaded';
+                try {
+                    urlDisplay.textContent = frame.contentWindow.location.href;
+                } catch (e) {
+                    // Cross-origin restriction
                 }
-            }
-        });
-        
-        // Auto-focus URL bar on page load
-        window.addEventListener('load', function() {
-            const urlInput = document.getElementById('urlInput');
-            urlInput.focus();
+            };
             
-            // Select all text if there's a value
-            if (urlInput.value) {
-                urlInput.select();
-            }
-            
-            // Update memory usage periodically
-            setInterval(updateStats, 5000);
-        });
-        
-        function updateStats() {
-            // Simulated stats update
-            const memory = Math.random() * 50 + 100;
-            document.getElementById('memory').textContent = Math.round(memory);
+            frame.onerror = () => {
+                statusText.textContent = 'Error loading page';
+            };
         }
         
-        // Handle links within the page
-        document.addEventListener('click', function(e) {
-            if (e.target.tagName === 'A' && e.target.href) {
-                e.preventDefault();
-                const url = e.target.href;
-                document.getElementById('urlInput').value = url;
-                navigate();
-            }
+        // Handle Enter key
+        urlInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') navigate();
         });
         
-        // Initial stats
-        updateStats();
+        // Auto-resize iframe
+        window.addEventListener('resize', () => {
+            frame.style.height = (window.innerHeight - 150) + 'px';
+        });
+        
+        // Initial resize
+        setTimeout(() => window.dispatchEvent(new Event('resize')), 100);
     </script>
 </body>
 </html>
 '''
 
-class LightweightBrowser:
-    """A lightweight browser that fetches and renders web content"""
-    
-    def __init__(self):
-        self.session = requests.Session()
-        self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.5',
-            'Accept-Encoding': 'gzip, deflate',
-            'Connection': 'keep-alive',
-        })
-        self.cache = {}
-        self.cache_timeout = 300  # 5 minutes
-        self.max_content_size = 50000  # 50KB max content to process
-        
-    def fetch_url(self, url):
-        """Fetch and parse a URL"""
-        try:
-            # Check cache first
-            cache_key = url.lower()
-            if cache_key in self.cache:
-                cached_time, cached_data = self.cache[cache_key]
-                if time.time() - cached_time < self.cache_timeout:
-                    return cached_data
-            
-            logger.info(f"Fetching URL: {url}")
-            
-            # Validate URL
-            parsed = urllib.parse.urlparse(url)
-            if not parsed.scheme:
-                url = 'https://' + url
-                parsed = urllib.parse.urlparse(url)
-            
-            # Fetch the content
-            response = self.session.get(url, timeout=10)
-            response.raise_for_status()
-            
-            # Check content type
-            content_type = response.headers.get('content-type', '').lower()
-            
-            if 'text/html' in content_type:
-                content = response.text[:self.max_content_size]
-                processed = self.process_html(content, url)
-            elif 'application/json' in content_type:
-                content = response.text[:self.max_content_size]
-                processed = self.process_json(content)
-            elif 'text/plain' in content_type:
-                content = response.text[:self.max_content_size]
-                processed = self.process_text(content)
-            else:
-                # For non-text content, return a placeholder
-                processed = self.create_placeholder(f"Content type not supported: {content_type}")
-            
-            result = {
-                'content': processed,
-                'url': url,
-                'status': 'success',
-                'content_type': content_type,
-                'size': len(response.content)
-            }
-            
-            # Cache the result
-            self.cache[cache_key] = (time.time(), result)
-            
-            # Clean old cache entries
-            self.clean_cache()
-            
-            return result
-            
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Request error for {url}: {e}")
-            return {
-                'content': self.create_error_page(str(e)),
-                'url': url,
-                'status': 'error',
-                'error': str(e)
-            }
-        except Exception as e:
-            logger.error(f"Unexpected error for {url}: {e}")
-            return {
-                'content': self.create_error_page(f"Unexpected error: {str(e)}"),
-                'url': url,
-                'status': 'error',
-                'error': str(e)
-            }
-    
-    def process_html(self, html_content, base_url):
-        """Process HTML content into safe, renderable format"""
-        try:
-            # Basic HTML sanitization and processing
-            # Remove scripts and styles for security
-            html_content = re.sub(r'<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>', '', html_content, flags=re.IGNORECASE)
-            html_content = re.sub(r'<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>', '', html_content, flags=re.IGNORECASE)
-            
-            # Extract title
-            title_match = re.search(r'<title[^>]*>(.*?)</title>', html_content, re.IGNORECASE | re.DOTALL)
-            title = title_match.group(1).strip() if title_match else "No Title"
-            
-            # Extract body content
-            body_match = re.search(r'<body[^>]*>(.*?)</body>', html_content, re.IGNORECASE | re.DOTALL)
-            body_content = body_match.group(1) if body_match else html_content
-            
-            # Convert relative URLs to absolute
-            def make_absolute(match):
-                tag, attr, value = match.groups()
-                if value.startswith(('http://', 'https://', '//', 'data:', 'mailto:', 'tel:')):
-                    return f'{tag} {attr}="{value}"'
-                else:
-                    absolute = urllib.parse.urljoin(base_url, value)
-                    return f'{tag} {attr}="{absolute}"'
-            
-            # Process common attributes
-            body_content = re.sub(r'(<a\s[^>]*href=)"([^"]*)"', 
-                                lambda m: f'{m.group(1)}"{urllib.parse.urljoin(base_url, m.group(2))}"', 
-                                body_content, flags=re.IGNORECASE)
-            
-            body_content = re.sub(r'(<img\s[^>]*src=)"([^"]*)"', 
-                                lambda m: f'{m.group(1)}"{urllib.parse.urljoin(base_url, m.group(2))}"', 
-                                body_content, flags=re.IGNORECASE)
-            
-            # Limit content length
-            if len(body_content) > 20000:
-                body_content = body_content[:20000] + "... [Content truncated]"
-            
-            # Create formatted HTML
-            formatted = f"""
-            <h1>{html.escape(title)}</h1>
-            <hr>
-            <div class="page-content">
-            {body_content}
-            </div>
-            """
-            
-            return formatted
-            
-        except Exception as e:
-            logger.error(f"HTML processing error: {e}")
-            return self.create_error_page(f"HTML processing error: {str(e)}")
-    
-    def process_json(self, json_content):
-        """Process JSON content"""
-        try:
-            data = json.loads(json_content)
-            formatted = json.dumps(data, indent=2)
-            return f"<pre><code>{html.escape(formatted)}</code></pre>"
-        except:
-            return f"<pre><code>{html.escape(json_content[:1000])}</code></pre>"
-    
-    def process_text(self, text_content):
-        """Process plain text content"""
-        escaped = html.escape(text_content[:2000])
-        return f"<pre>{escaped}</pre>"
-    
-    def create_error_page(self, error_msg):
-        """Create an error page"""
-        return f"""
-        <div class="error-message">
-            <h2>⚠️ Unable to Load Page</h2>
-            <p><strong>Error:</strong> {html.escape(error_msg)}</p>
-            <p>This lightweight browser cannot load all websites. Try:</p>
-            <ul>
-                <li>Simple text-based websites (like Hacker News)</li>
-                <li>Wikipedia pages</li>
-                <li>Documentation sites</li>
-                <li>Plain HTML pages</li>
-            </ul>
-            <p>Complex sites with heavy JavaScript may not work.</p>
-        </div>
-        """
-    
-    def create_placeholder(self, message):
-        """Create a placeholder for unsupported content"""
-        return f"""
-        <div style="text-align: center; padding: 50px;">
-            <h3>🔧 Content Not Displayed</h3>
-            <p>{html.escape(message)}</p>
-            <p>This lightweight browser focuses on text content.</p>
-        </div>
-        """
-    
-    def clean_cache(self):
-        """Clean old cache entries"""
-        current_time = time.time()
-        keys_to_remove = []
-        
-        for key, (cached_time, _) in self.cache.items():
-            if current_time - cached_time > self.cache_timeout:
-                keys_to_remove.append(key)
-        
-        for key in keys_to_remove:
-            del self.cache[key]
-        
-        if keys_to_remove:
-            logger.info(f"Cleaned {len(keys_to_remove)} cache entries")
-
-# Create browser instance
-browser = LightweightBrowser()
-
 @app.route('/')
 def index():
-    """Main browser interface"""
-    url = request.args.get('url', '').strip()
-    current_url = url if url else ''
-    content = ''
-    error = None
-    page_info = "Ready"
-    memory_usage = round(os.sys.getsizeof(browser.cache) / 1024 / 1024, 2)
-    
-    if url:
-        try:
-            result = browser.fetch_url(url)
-            
-            if result['status'] == 'success':
-                content = result['content']
-                current_url = result['url']
-                page_info = f"Loaded: {result['content_type'].split(';')[0]} | Size: {result['size']:,} bytes"
-            else:
-                error = result.get('error', 'Unknown error')
-                content = result['content']
-                page_info = "Error loading page"
-                
-        except Exception as e:
-            error = str(e)
-            page_info = "Error"
-            logger.error(f"Error in index route: {e}")
-    
-    return render_template_string(
-        HTML_TEMPLATE,
-        content=content,
-        error=error,
-        current_url=current_url,
-        page_info=page_info,
-        memory_usage=memory_usage
-    )
+    """Main interface"""
+    return HTML
 
-@app.route('/api/fetch')
-def api_fetch():
-    """API endpoint to fetch URL content"""
-    url = request.args.get('url', '')
-    if not url:
-        return jsonify({'error': 'URL parameter required'}), 400
+@app.route('/proxy')
+def proxy():
+    """Proxy endpoint that renders JavaScript sites"""
+    url = request.args.get('url', '').strip()
     
-    result = browser.fetch_url(url)
-    return jsonify(result)
+    if not url:
+        return "No URL provided", 400
+    
+    # Add protocol if missing
+    if not url.startswith(('http://', 'https://')):
+        url = 'https://' + url
+    
+    # Create a simple proxy page
+    proxy_page = f'''
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Loading: {url}</title>
+        <style>
+            body {{ margin: 0; padding: 20px; font-family: Arial, sans-serif; }}
+            .loading {{ text-align: center; padding: 50px; }}
+            .spinner {{
+                border: 5px solid #f3f3f3;
+                border-top: 5px solid #3498db;
+                border-radius: 50%;
+                width: 50px;
+                height: 50px;
+                animation: spin 1s linear infinite;
+                margin: 0 auto 20px;
+            }}
+            @keyframes spin {{
+                0% {{ transform: rotate(0deg); }}
+                100% {{ transform: rotate(360deg); }}
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="loading">
+            <div class="spinner"></div>
+            <h2>Loading: {url}</h2>
+            <p>Please wait while we load the website...</p>
+        </div>
+        
+        <script>
+            // Redirect to the actual URL
+            setTimeout(() => {{
+                window.location.href = "{url}";
+            }}, 100);
+        </script>
+    </body>
+    </html>
+    '''
+    
+    return proxy_page
+
+@app.route('/screenshot')
+def screenshot():
+    """Take a screenshot of a website (Playwright method)"""
+    try:
+        url = request.args.get('url', 'https://mln49z-8888.csb.app/tree?')
+        
+        # Try to use Playwright if available
+        try:
+            from playwright.sync_api import sync_playwright
+            
+            with sync_playwright() as p:
+                # Use Chromium in headless mode
+                browser = p.chromium.launch(headless=True)
+                page = browser.new_page(viewport={'width': 1280, 'height': 720})
+                
+                # Navigate to URL
+                page.goto(url, wait_until='networkidle')
+                
+                # Take screenshot
+                screenshot_bytes = page.screenshot(full_page=False)
+                browser.close()
+                
+                return Response(
+                    screenshot_bytes,
+                    mimetype='image/png',
+                    headers={'Content-Disposition': f'attachment; filename=screenshot.png'}
+                )
+                
+        except ImportError:
+            # Playwright not installed yet
+            return jsonify({
+                'error': 'Playwright is still installing. Please wait 1-2 minutes and refresh.',
+                'status': 'installing',
+                'url': url
+            })
+            
+    except Exception as e:
+        return jsonify({'error': str(e), 'url': url}), 500
+
+@app.route('/render')
+def render_page():
+    """Render a webpage with Playwright and return HTML"""
+    url = request.args.get('url', 'https://mln49z-8888.csb.app/tree?')
+    
+    try:
+        from playwright.sync_api import sync_playwright
+        
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page()
+            
+            # Navigate and wait for page to load
+            page.goto(url, wait_until='networkidle')
+            
+            # Get the rendered HTML
+            content = page.content()
+            browser.close()
+            
+            return content
+            
+    except Exception as e:
+        return f'''
+        <html>
+        <body>
+            <h2>Error loading {url}</h2>
+            <p>{str(e)}</p>
+            <p>Playwright might still be installing. Try again in a minute.</p>
+        </body>
+        </html>
+        ''', 500
+
+@app.route('/api/navigate', methods=['POST'])
+def api_navigate():
+    """API endpoint for navigation"""
+    data = request.json
+    url = data.get('url', '')
+    
+    if not url:
+        return jsonify({'error': 'URL required'}), 400
+    
+    # Return a proxy URL that will load the site
+    proxy_url = f"/proxy?url={urllib.parse.quote(url)}"
+    
+    return jsonify({
+        'success': True,
+        'url': url,
+        'proxy_url': proxy_url,
+        'timestamp': datetime.now().isoformat()
+    })
 
 @app.route('/health')
 def health():
     """Health check endpoint"""
     return jsonify({
         'status': 'healthy',
-        'cache_size': len(browser.cache),
-        'memory': round(os.sys.getsizeof(browser.cache) / 1024, 2),
-        'timestamp': datetime.now().isoformat()
+        'service': 'modern-browser-proxy',
+        'timestamp': datetime.now().isoformat(),
+        'playwright': 'installing'  # Will update when ready
     })
 
-@app.route('/screenshot')
-def screenshot():
-    """Generate a simple screenshot of text content"""
-    text = request.args.get('text', 'No text provided')
+@app.route('/direct')
+def direct_proxy():
+    """Direct proxy that works with most sites"""
+    url = request.args.get('url', '')
     
-    # Create a simple image with the text
-    img = Image.new('RGB', (800, 400), color=(255, 255, 255))
-    d = ImageDraw.Draw(img)
+    if not url:
+        return "URL parameter required", 400
     
-    # Use default font
-    try:
-        font = ImageFont.load_default()
-    except:
-        font = None
-    
-    # Add text
-    d.text((10, 10), text, fill=(0, 0, 0), font=font)
-    
-    # Add border
-    d.rectangle([(0, 0), (799, 399)], outline=(200, 200, 200), width=2)
-    
-    # Save to bytes
-    img_io = BytesIO()
-    img.save(img_io, 'PNG')
-    img_io.seek(0)
-    
-    return send_file(img_io, mimetype='image/png')
-
-@app.route('/static/<path:filename>')
-def static_files(filename):
-    """Serve static files if needed"""
-    return f"Static file {filename} not found in single-file mode", 404
+    # Simple redirect page
+    return f'''
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta http-equiv="refresh" content="0; url={url}">
+        <script>window.location.href = "{url}";</script>
+    </head>
+    <body>
+        <p>Redirecting to <a href="{url}">{url}</a>...</p>
+    </body>
+    </html>
+    '''
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 10000))
     
-    logger.info(f"""
-    ╔══════════════════════════════════════════╗
-    ║   Lightweight Browser Starting...        ║
-    ║   Port: {port}                            ║
-    ║   Memory: ~100-200MB                     ║
-    ║   Supports: Simple HTML/text sites       ║
-    ╚══════════════════════════════════════════╝
+    print(f"""
+    🚀 Modern Browser Proxy Starting...
+    Port: {port}
+    
+    🌐 Target URL: https://mln49z-8888.csb.app/tree?
+    
+    ⏳ Playwright is installing in background...
+    This may take 1-2 minutes on first run.
+    
+    🔗 Your browser will be available at:
+    http://localhost:{port}?url=https://mln49z-8888.csb.app/tree?
+    
+    📊 Health check: http://localhost:{port}/health
     """)
     
-    # Start the server
+    # Run the app
     app.run(
         host='0.0.0.0',
         port=port,

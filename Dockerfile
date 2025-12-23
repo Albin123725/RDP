@@ -29,21 +29,11 @@ RUN apt update && apt install -y \
     python3 \
     python3-numpy \
     dbus-x11 \
+    novnc \
+    websockify \
     --no-install-recommends && \
     apt clean && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
-
-# Install noVNC
-RUN wget -q https://github.com/novnc/noVNC/archive/refs/tags/v1.4.0.tar.gz -O /tmp/novnc.tar.gz && \
-    tar -xzf /tmp/novnc.tar.gz -C /opt/ && \
-    mv /opt/noVNC-1.4.0 /opt/novnc && \
-    rm /tmp/novnc.tar.gz
-
-# Install websockify
-RUN wget -q https://github.com/novnc/websockify/archive/refs/tags/v0.11.0.tar.gz -O /tmp/websockify.tar.gz && \
-    tar -xzf /tmp/websockify.tar.gz -C /opt/ && \
-    mv /opt/websockify-0.11.0 /opt/websockify && \
-    rm /tmp/websockify.tar.gz
 
 # Create VNC password file
 RUN mkdir -p /root/.vnc && \
@@ -84,26 +74,10 @@ EOF
 
 RUN chmod +x /root/.fluxbox/startup
 
-# Copy noVNC HTML files
-RUN cp /opt/novnc/vnc_lite.html /opt/novnc/index.html
+# Link novnc files for easy access
+RUN ln -s /usr/share/novnc/vnc_lite.html /usr/share/novnc/index.html
 
-# Create Python script for noVNC with IP address instead of localhost
-RUN cat > /opt/novnc/start-novnc.py << 'EOF'
-#!/usr/bin/env python3
-import sys
-import os
-sys.path.insert(0, '/opt/websockify')
-from websockify.websocketproxy import WebSocketProxy
-
-if __name__ == '__main__':
-    # Use 127.0.0.1 instead of localhost to avoid DNS resolution issues
-    sys.argv = ['websockify', '--web', '/opt/novnc', '0.0.0.0:10000', '127.0.0.1:5901']
-    WebSocketProxy().start_server()
-EOF
-
-RUN chmod +x /opt/novnc/start-novnc.py
-
-# Create startup script with better error handling
+# Create startup script
 RUN cat > /start.sh << 'EOF'
 #!/bin/bash
 
@@ -146,20 +120,18 @@ if ! pgrep -x "x11vnc" > /dev/null; then
     exit 1
 fi
 
-# Start noVNC
+# Start noVNC using system package
 echo "Starting noVNC on port 10000"
-cd /opt/novnc
-python3 start-novnc.py &
+websockify --web /usr/share/novnc 0.0.0.0:10000 localhost:5901 &
 NOVNC_PID=$!
 
 sleep 3
 
 # Check if noVNC is running
 if ! ps -p $NOVNC_PID > /dev/null 2>&1; then
-    echo "WARNING: noVNC may have issues, trying alternative method..."
-    # Try running websockify directly
-    cd /opt/websockify
-    python3 -m websockify.websocketproxy --web /opt/novnc 0.0.0.0:10000 127.0.0.1:5901 &
+    echo "Trying alternative noVNC startup..."
+    # Alternative method
+    /usr/bin/websockify --web /usr/share/novnc 0.0.0.0:10000 127.0.0.1:5901 &
     NOVNC_PID=$!
     sleep 2
 fi
@@ -167,7 +139,6 @@ fi
 echo "=========================================="
 echo "VNC Desktop is ready!"
 echo "Access at: https://${RENDER_EXTERNAL_HOSTNAME:-localhost}/vnc_lite.html"
-echo "or: https://${RENDER_EXTERNAL_HOSTNAME:-localhost}/"
 echo "Password: $VNC_PASSWD"
 echo "=========================================="
 
@@ -175,7 +146,8 @@ echo "=========================================="
 if netstat -tuln | grep -q ":10000"; then
     echo "noVNC is listening on port 10000"
 else
-    echo "WARNING: Port 10000 is not listening"
+    echo "Checking processes..."
+    ps aux | grep -E "(websockify|novnc)" | grep -v grep
 fi
 
 # Keep running

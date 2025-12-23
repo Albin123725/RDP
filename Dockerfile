@@ -1,6 +1,5 @@
 FROM ubuntu:22.04
 
-# Set environment variables
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Asia/Kolkata
 ENV USER=root
@@ -14,7 +13,7 @@ ENV VNC_DEPTH=16
 RUN ln -fs /usr/share/zoneinfo/Asia/Kolkata /etc/localtime && \
     echo "Asia/Kolkata" > /etc/timezone
 
-# Install packages
+# Install packages (REMOVE novnc and websockify packages - we'll install manually)
 RUN apt update && apt install -y \
     fluxbox \
     xterm \
@@ -22,15 +21,14 @@ RUN apt update && apt install -y \
     firefox \
     x11vnc \
     xvfb \
-    wget \
     net-tools \
     x11-xserver-utils \
     xfonts-base \
     python3 \
     python3-numpy \
     dbus-x11 \
-    novnc \
-    websockify \
+    wget \
+    unzip \
     --no-install-recommends && \
     apt clean && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
@@ -61,150 +59,169 @@ RUN mkdir -p /root/.fluxbox && \
 [end]
 EOF
 
-# Create simple fluxbox startup file
+# Create startup file
 RUN cat > /root/.fluxbox/startup << 'EOF'
 #!/bin/sh
-# fluxbox startup script
-
-# Start applications
 xterm -geometry 80x24+10+10 &
 thunar &
 firefox &
 EOF
-
 RUN chmod +x /root/.fluxbox/startup
 
-# Link novnc files for easy access
-RUN ln -s /usr/share/novnc/vnc_lite.html /usr/share/novnc/index.html
+# DOWNLOAD LATEST NOVNC from GitHub (not Ubuntu package)
+RUN cd /opt && \
+    wget -q https://github.com/novnc/noVNC/archive/refs/tags/v1.4.0.tar.gz -O novnc.tar.gz && \
+    tar -xzf novnc.tar.gz && \
+    mv noVNC-1.4.0 novnc && \
+    rm novnc.tar.gz && \
+    # Download websockify
+    cd /opt/novnc/utils && \
+    wget -q https://github.com/novnc/websockify/archive/refs/tags/v0.11.0.tar.gz -O websockify.tar.gz && \
+    tar -xzf websockify.tar.gz && \
+    mv websockify-0.11.0 websockify && \
+    rm websockify.tar.gz
 
-# Create startup script with proper error handling and port management
+# Create a SIMPLE index.html that works with latest noVNC
+RUN cat > /opt/novnc/index.html << 'EOF'
+<!DOCTYPE html>
+<html>
+<head>
+    <title>VNC Desktop</title>
+    <meta charset="utf-8">
+    <style>
+        body { margin: 0; padding: 0; background: #2d2d2d; }
+        #noVNC_container { width: 100vw; height: 100vh; }
+        #noVNC_connect_button { 
+            position: fixed; top: 20px; left: 20px; 
+            background: #4CAF50; color: white; border: none; 
+            padding: 10px 20px; border-radius: 4px; cursor: pointer;
+            font-size: 16px; z-index: 1000;
+        }
+    </style>
+</head>
+<body>
+    <button id="noVNC_connect_button">Connect to VNC</button>
+    <div id="noVNC_container"></div>
+    
+    <script type="module">
+        import RFB from './app/rfb.js';
+        
+        document.getElementById('noVNC_connect_button').onclick = function() {
+            this.style.display = 'none';
+            
+            const host = window.location.hostname;
+            const port = window.location.port || (window.location.protocol === 'https:' ? '443' : '80');
+            const path = 'websockify';
+            
+            // Create RFB object
+            const rfb = new RFB(document.getElementById('noVNC_container'), 
+                `wss://${host}:${port}/${path}`, {
+                credentials: { password: 'password123' }
+            });
+            
+            rfb.addEventListener("connect", () => console.log("Connected!"));
+            rfb.addEventListener("disconnect", () => console.log("Disconnected"));
+            rfb.addEventListener("credentialsrequired", () => console.log("Credentials required"));
+            rfb.addEventListener("securityfailure", (e) => console.log("Security failure:", e.detail));
+            rfb.addEventListener("clipboard", (e) => console.log("Clipboard:", e.detail));
+            rfb.addEventListener("bell", () => console.log("Bell!"));
+            rfb.addEventListener("desktopname", (e) => console.log("Desktop name:", e.detail));
+        };
+    </script>
+</body>
+</html>
+EOF
+
+# Also copy vnc_lite.html as backup
+RUN cp /opt/novnc/vnc_lite.html /opt/novnc/vnc_lite.html.backup
+
+# Create SIMPLE vnc_lite.html that definitely works
+RUN cat > /opt/novnc/vnc_lite.html << 'EOF'
+<!DOCTYPE html>
+<html>
+<head>
+    <title>noVNC Lite</title>
+    <meta charset="utf-8">
+    <script src="./app/ui.js"></script>
+    <script>
+    "use strict";
+    window.addEventListener('load', function() {
+        const UI = window.UI;
+        const host = window.location.hostname;
+        const port = window.location.port || (window.location.protocol === 'https:' ? '443' : '80');
+        const path = 'websockify';
+        
+        // Auto-connect after 1 second
+        setTimeout(function() {
+            UI.connect(host, port, 'password123', path);
+        }, 1000);
+    });
+    </script>
+</head>
+<body>
+    <div id="noVNC_screen"></div>
+</body>
+</html>
+EOF
+
+# Create startup script that uses Python websockify module directly
 RUN cat > /start.sh << 'EOF'
 #!/bin/bash
 
-# Clean up all X11 and VNC related files
-echo "Cleaning up old processes and lock files..."
-rm -rf /tmp/.X11-unix/X99 /tmp/.X99-lock 2>/dev/null || true
-rm -rf /tmp/.X11-unix/X1 /tmp/.X1-lock 2>/dev/null || true
+echo "=== Starting VNC Desktop Environment ==="
 
-# Kill any existing processes
+# Clean up
 pkill -9 x11vnc 2>/dev/null || true
 pkill -9 Xvfb 2>/dev/null || true
-pkill -9 fluxbox 2>/dev/null || true
-pkill -9 websockify 2>/dev/null || true
-
-# Kill any process on port 5901 and 10000
+pkill -9 python3 2>/dev/null || true
 fuser -k 5901/tcp 2>/dev/null || true
 fuser -k 10000/tcp 2>/dev/null || true
-
-# Set DISPLAY
-export DISPLAY=:99
+fuser -k 8080/tcp 2>/dev/null || true
+rm -rf /tmp/.X11-unix/* /tmp/.X*-lock 2>/dev/null || true
 
 # Start Xvfb
-echo "Starting Xvfb on display :99"
+echo "1. Starting Xvfb on :99"
+export DISPLAY=:99
 Xvfb :99 -screen 0 ${VNC_RESOLUTION}x${VNC_DEPTH} &
-XVFB_PID=$!
-
-# Wait for Xvfb to start
 sleep 3
-
-# Verify Xvfb is running
-if ! ps -p $XVFB_PID > /dev/null; then
-    echo "ERROR: Xvfb failed to start"
-    exit 1
-fi
 
 # Start fluxbox
-echo "Starting Fluxbox"
+echo "2. Starting Fluxbox"
 fluxbox &
-FLUXBOX_PID=$!
-
 sleep 2
 
-# Check if fluxbox is running
-if ! ps -p $FLUXBOX_PID > /dev/null; then
-    echo "WARNING: Fluxbox may have issues, but continuing..."
-fi
-
-# Start x11vnc with proper cleanup first
-echo "Clearing any existing VNC processes..."
-pkill -9 x11vnc 2>/dev/null || true
-fuser -k 5901/tcp 2>/dev/null || true
-sleep 1
-
-echo "Starting x11vnc on port 5901"
-# Use -localhost no to allow connections from websockify
-x11vnc -display :99 -forever -shared -rfbauth /root/.vnc/passwd -bg -rfbport 5901 -localhost no -noxdamage -nowf -noscr -cursor arrow
-
+# Start x11vnc
+echo "3. Starting x11vnc on port 5901"
+x11vnc -display :99 -forever -shared -rfbauth /root/.vnc/passwd -rfbport 5901 -bg -noxdamage -nowf -noscr
 sleep 2
 
-# Check if x11vnc is running
-if ! pgrep -x "x11vnc" > /dev/null; then
-    echo "ERROR: x11vnc failed to start"
-    echo "Trying alternative x11vnc startup..."
-    x11vnc -display :99 -forever -shared -rfbauth /root/.vnc/passwd -rfbport 5901 -localhost no &
-    sleep 2
-fi
+# Start websockify (WebSocket proxy)
+echo "4. Starting websockify WebSocket proxy on port 10000"
+cd /opt/novnc/utils/websockify
+python3 -m websockify --web /opt/novnc 0.0.0.0:10000 localhost:5901 &
+sleep 2
 
-# Verify x11vnc is listening on port 5901
-if netstat -tuln | grep -q ":5901"; then
-    echo "SUCCESS: x11vnc is listening on port 5901"
-else
-    echo "WARNING: x11vnc may not be listening on port 5901"
-    echo "Checking x11vnc process..."
-    pgrep -a x11vnc
-fi
+# Start simple HTTP server on port 8080
+echo "5. Starting HTTP server on port 8080"
+cd /opt/novnc
+python3 -m http.server 8080 &
+sleep 2
 
-# Start noVNC using system package
-echo "Starting noVNC on port 10000"
-# Clear port 10000 first
-fuser -k 10000/tcp 2>/dev/null || true
-sleep 1
+# Verification
+echo "=== SERVICE STATUS ==="
+echo "x11vnc:     $(pgrep x11vnc >/dev/null && echo '✓ RUNNING (port 5901)' || echo '✗ FAILED')"
+echo "websockify: $(pgrep -f 'websockify.*10000' >/dev/null && echo '✓ RUNNING (port 10000)' || echo '✗ FAILED')"
+echo "HTTP:       $(netstat -tuln | grep :8080 >/dev/null && echo '✓ RUNNING (port 8080)' || echo '✗ NOT RUNNING')"
+echo "Xvfb:       $(pgrep Xvfb >/dev/null && echo '✓ RUNNING' || echo '✗ FAILED')"
+echo ""
+echo "=== HOW TO CONNECT ==="
+echo "OPTION 1 (Recommended): https://${RENDER_EXTERNAL_HOSTNAME:-localhost}/"
+echo "OPTION 2: https://${RENDER_EXTERNAL_HOSTNAME:-localhost}/vnc_lite.html"
+echo "OPTION 3: Use VNC client to connect to: ${RENDER_EXTERNAL_HOSTNAME:-localhost}:5901"
+echo "Password for all: $VNC_PASSWD"
+echo "======================================"
 
-websockify --web /usr/share/novnc 0.0.0.0:10000 localhost:5901 &
-NOVNC_PID=$!
-
-sleep 3
-
-# Check if noVNC is running
-if ! ps -p $NOVNC_PID > /dev/null 2>&1; then
-    echo "Trying alternative noVNC startup..."
-    # Alternative method with 127.0.0.1 instead of localhost
-    /usr/bin/websockify --web /usr/share/novnc 0.0.0.0:10000 127.0.0.1:5901 &
-    NOVNC_PID=$!
-    sleep 2
-fi
-
-echo "=========================================="
-echo "VNC Desktop is ready!"
-echo "Access at: https://${RENDER_EXTERNAL_HOSTNAME:-localhost}/vnc_lite.html"
-echo "Password: $VNC_PASSWD"
-echo "=========================================="
-
-# Test if port 10000 is listening
-if netstat -tuln | grep -q ":10000"; then
-    echo "SUCCESS: noVNC is listening on port 10000"
-else
-    echo "WARNING: Port 10000 is not listening"
-    echo "Checking websockify process..."
-    ps aux | grep -E "(websockify|novnc)" | grep -v grep
-fi
-
-# Test if port 5901 is listening
-if netstat -tuln | grep -q ":5901"; then
-    echo "SUCCESS: x11vnc is listening on port 5901"
-else
-    echo "ERROR: x11vnc is NOT listening on port 5901"
-    echo "This is likely why noVNC shows 'loading'"
-    echo "Trying emergency restart of x11vnc..."
-    pkill -9 x11vnc 2>/dev/null || true
-    x11vnc -display :99 -forever -shared -rfbauth /root/.vnc/passwd -rfbport 5901 &
-    sleep 2
-fi
-
-echo "Current network status:"
-netstat -tuln | grep -E "(5901|10000)"
-
-# Keep running
+# Keep container alive
 tail -f /dev/null
 EOF
 

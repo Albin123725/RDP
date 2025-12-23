@@ -146,9 +146,6 @@ RUN cat > /opt/novnc/vnc.html << 'EOF'
 </html>
 EOF
 
-# Also copy vnc_lite.html
-RUN cp /opt/novnc/vnc_lite.html /opt/novnc/
-
 # Create startup script with SSL/TLS
 RUN cat > /start.sh << 'EOF'
 #!/bin/bash

@@ -14,7 +14,7 @@ ENV VNC_DEPTH=16
 RUN ln -fs /usr/share/zoneinfo/Asia/Kolkata /etc/localtime && \
     echo "Asia/Kolkata" > /etc/timezone
 
-# Install core packages
+# Install core packages including X11 fonts
 RUN apt update && apt install -y \
     xfce4 \
     xfce4-terminal \
@@ -25,6 +25,11 @@ RUN apt update && apt install -y \
     tightvncserver \
     wget \
     net-tools \
+    x11-xserver-utils \
+    xfonts-base \
+    xfonts-100dpi \
+    xfonts-75dpi \
+    xfonts-cyrillic \
     --no-install-recommends && \
     apt clean && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
@@ -50,7 +55,7 @@ RUN wget -q https://github.com/novnc/noVNC/archive/refs/tags/v1.4.0.tar.gz -O /t
     mv /opt/novnc/utils/websockify-0.11.0 /opt/novnc/utils/websockify && \
     rm /tmp/websockify.tar.gz
 
-# Setup VNC - create passwd file first
+# Setup VNC
 RUN mkdir -p /root/.vnc && \
     echo "$VNC_PASSWD" | vncpasswd -f > /root/.vnc/passwd && \
     chmod 600 /root/.vnc/passwd
@@ -60,8 +65,7 @@ RUN cat > /root/.vnc/xstartup << 'EOF'
 #!/bin/bash
 unset SESSION_MANAGER
 unset DBUS_SESSION_BUS_ADDRESS
-[ -x /etc/vnc/xstartup ] && exec /etc/vnc/xstartup
-[ -r $HOME/.Xresources ] && xrdb $HOME/.Xresources
+xrdb $HOME/.Xresources
 xsetroot -solid grey
 vncconfig -iconic &
 startxfce4 &
@@ -69,11 +73,9 @@ EOF
 
 RUN chmod +x /root/.vnc/xstartup
 
-# Create a simple .Xresources file
-RUN echo "Xft.dpi: 96" > /root/.Xresources
-
-# Fix the font path issue in vncserver
-RUN sed -i 's|^.*\$fontPath.*=.*|$fontPath = "";|' /usr/bin/vncserver
+# Fix the font path issue in vncserver - properly this time
+RUN sed -i '/\$fontPath =/s/^/#/' /usr/bin/vncserver && \
+    echo '$fontPath = "";' >> /usr/bin/vncserver
 
 # Configure Firefox for low memory
 RUN mkdir -p /root/.mozilla/firefox/default && \
@@ -91,33 +93,24 @@ RUN cp /opt/novnc/vnc_lite.html /opt/novnc/index.html
 RUN cat > /start.sh << 'EOF'
 #!/bin/bash
 
+# Set DISPLAY variable
+export DISPLAY=:1
+
 # Kill any existing VNC server
 vncserver -kill :1 2>/dev/null || true
 rm -rf /tmp/.X1-lock /tmp/.X11-unix/X1 2>/dev/null || true
 
-# Generate .Xauthority file
-touch /root/.Xauthority
-xauth generate :1 . trusted 2>/dev/null || true
-
-# Start VNC server with correct options
+# Start VNC server
 echo "Starting VNC server with resolution: ${VNC_RESOLUTION}"
-# First run to create config
-vncserver :1 -geometry ${VNC_RESOLUTION} -depth ${VNC_DEPTH} 2>&1 | tee /tmp/vnc-start.log
-
-# Kill and restart with proper settings
-vncserver -kill :1 2>/dev/null || true
-sleep 2
-
-# Start final VNC server
-vncserver :1 -geometry ${VNC_RESOLUTION} -depth ${VNC_DEPTH} -localhost no 2>&1 | tee /tmp/vnc-final.log
+vncserver :1 -geometry ${VNC_RESOLUTION} -depth ${VNC_DEPTH} -SecurityTypes VncAuth
 
 # Check if VNC is running
-if netstat -tuln | grep -q ":5901"; then
-    echo "VNC server is running on port 5901"
+sleep 2
+if pgrep -f "Xtightvnc" > /dev/null; then
+    echo "VNC server is running"
+    echo "VNC port: 5901"
 else
     echo "ERROR: VNC server failed to start"
-    cat /tmp/vnc-start.log
-    cat /tmp/vnc-final.log
     exit 1
 fi
 

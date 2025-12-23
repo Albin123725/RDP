@@ -14,7 +14,7 @@ ENV VNC_DEPTH=16
 RUN ln -fs /usr/share/zoneinfo/Asia/Kolkata /etc/localtime && \
     echo "Asia/Kolkata" > /etc/timezone
 
-# Install minimal packages - using fluxbox instead of xfce for lower memory
+# Install minimal packages
 RUN apt update && apt install -y \
     fluxbox \
     xterm \
@@ -26,6 +26,9 @@ RUN apt update && apt install -y \
     net-tools \
     x11-xserver-utils \
     xfonts-base \
+    python3 \
+    python3-numpy \
+    dbus-x11 \
     --no-install-recommends && \
     apt clean && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
@@ -57,7 +60,7 @@ EOF
 # Create fluxbox menu with our apps
 RUN mkdir -p /root/.fluxbox && \
     cat > /root/.fluxbox/menu << 'EOF'
-[begin] (Fluxbox)
+[begin] (Applications)
   [exec] (Terminal) {xterm}
   [exec] (File Manager) {thunar}
   [exec] (Firefox) {firefox}
@@ -73,8 +76,9 @@ RUN cp /opt/novnc/vnc_lite.html /opt/novnc/index.html
 RUN cat > /start.sh << 'EOF'
 #!/bin/bash
 
-# Kill any existing processes on port 5901
+# Kill any existing processes on port 5901 and 10000
 fuser -k 5901/tcp 2>/dev/null || true
+fuser -k 10000/tcp 2>/dev/null || true
 
 # Set DISPLAY variable
 export DISPLAY=:99
@@ -89,28 +93,30 @@ sleep 3
 
 # Start fluxbox (lightweight window manager)
 echo "Starting Fluxbox"
-fluxbox &
+startfluxbox &
 FLUXBOX_PID=$!
 
 # Start applications
 echo "Starting applications"
-xterm &
+sleep 2
+xterm -geometry 80x24+10+10 &
 sleep 1
 thunar &
 sleep 1
 firefox &
 
-# Wait for everything to settle
-sleep 3
-
-# Start x11vnc once only
+# Start x11vnc
 echo "Starting x11vnc server on port 5901"
 x11vnc -display :99 -forever -shared -rfbauth /root/.vnc/passwd -bg -rfbport 5901 -noxdamage -nowf -noscr -cursor arrow
 
-# Start noVNC
+# Start noVNC with explicit Python 3
 echo "Starting noVNC on port 10000"
-/opt/novnc/utils/novnc_proxy --vnc localhost:5901 --listen 0.0.0.0:10000 --web /opt/novnc &
+cd /opt/novnc/utils/websockify
+python3 run --vnc localhost:5901 --listen 0.0.0.0:10000 --web /opt/novnc &
 NOVNC_PID=$!
+
+# Wait for noVNC to start
+sleep 3
 
 echo "=========================================="
 echo "VNC Desktop is ready!"
@@ -118,8 +124,24 @@ echo "Access at: https://${RENDER_EXTERNAL_HOSTNAME:-localhost}/vnc_lite.html"
 echo "Password: $VNC_PASSWD"
 echo "=========================================="
 
-# Keep container running
-tail -f /dev/null
+# Keep container running and monitor processes
+while true; do
+    # Check if noVNC is running
+    if ! ps -p $NOVNC_PID > /dev/null 2>&1; then
+        echo "noVNC died, restarting..."
+        cd /opt/novnc/utils/websockify
+        python3 run --vnc localhost:5901 --listen 0.0.0.0:10000 --web /opt/novnc &
+        NOVNC_PID=$!
+    fi
+    
+    # Check if x11vnc is running
+    if ! pgrep -x "x11vnc" > /dev/null; then
+        echo "x11vnc died, restarting..."
+        x11vnc -display :99 -forever -shared -rfbauth /root/.vnc/passwd -bg -rfbport 5901 -noxdamage -nowf -noscr -cursor arrow
+    fi
+    
+    sleep 10
+done
 EOF
 
 RUN chmod +x /start.sh

@@ -5,10 +5,7 @@ services:
     dockerfilePath: ./Dockerfile
     plan: free
     autoDeploy: true
-    # Change health check to just root path
     healthCheckPath: /
-    # Add longer timeout
-    # healthCheckTimeout: 60
     envVars:
       - key: VNC_RESOLUTION
         value: "1024x576"

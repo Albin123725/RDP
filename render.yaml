@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: real-browser-rdp
+    env: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    envVars:
+      - key: PORT
+        value: 8080
+      - key: DISPLAY
+        value: :99
+    healthCheckPath: /health
+    autoDeploy: true

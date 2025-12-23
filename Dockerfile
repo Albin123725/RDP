@@ -73,7 +73,7 @@ RUN cd /opt/novnc/utils && \
     mv websockify-0.11.0 websockify && \
     rm websockify.tar.gz
 
-# Create self-signed SSL certificate for WebSocket (required for HTTPS)
+# Create self-signed SSL certificate
 RUN mkdir -p /opt/novnc/utils/websockify && \
     cd /opt/novnc/utils/websockify && \
     openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
@@ -81,7 +81,7 @@ RUN mkdir -p /opt/novnc/utils/websockify && \
         -subj "/C=US/ST=State/L=City/O=Organization/CN=localhost" && \
     chmod 600 self.pem
 
-# Create ULTRA-SIMPLE index.html that auto-connects
+# Create PROPER index.html that connects to SAME PORT (8080)
 RUN cat > /opt/novnc/index.html << 'EOF'
 <!DOCTYPE html>
 <html>
@@ -93,50 +93,66 @@ RUN cat > /opt/novnc/index.html << 'EOF'
     window.addEventListener('load', function() {
         console.log("Page loaded, attempting to connect...");
         
-        // Get current URL
-        const url = new URL(window.location.href);
-        const host = url.hostname;
+        // Get current host (no port needed - Render will route to 8080)
+        const host = window.location.hostname;
         
-        // For Render: Connect via wss:// on same host, port 10000
-        // Use path 'websockify' as required by websockify
-        const rfbUrl = 'wss://' + host + ':10000/websockify';
+        // On Render, WebSocket is on SAME PORT as HTTP (8080)
+        // Use empty string for port to use same port as page
+        // Path is 'websockify' which is the WebSocket endpoint
         
-        console.log("Connecting to:", rfbUrl);
+        console.log("Auto-connecting to WebSocket on same port...");
         
-        // Auto-connect after short delay
+        // Auto-connect with no port specified (uses same port as page)
         setTimeout(function() {
-            UI.connect(host, '10000', 'password123', 'websockify');
-        }, 100);
+            UI.connect(host, '', 'password123', 'websockify');
+        }, 500);
     });
     </script>
     <style>
         body { margin: 0; padding: 0; background: #2d2d2d; color: white; font-family: Arial; }
-        #status { position: fixed; top: 20px; left: 20px; background: #333; padding: 10px; border-radius: 5px; }
+        #status { 
+            position: fixed; top: 20px; left: 20px; right: 20px;
+            background: #333; padding: 15px; border-radius: 5px; 
+            text-align: center; z-index: 1000;
+        }
+        #connect_btn {
+            background: #4CAF50; color: white; border: none;
+            padding: 10px 20px; margin: 10px; border-radius: 4px;
+            cursor: pointer; font-size: 16px;
+        }
         #noVNC_screen { width: 100vw; height: 100vh; }
     </style>
 </head>
 <body>
-    <div id="status">Connecting to VNC Desktop...</div>
+    <div id="status">
+        VNC Desktop Ready 
+        <button id="connect_btn" onclick="location.reload()">Retry Connection</button>
+        <div id="connection_info"></div>
+    </div>
     <div id="noVNC_screen"></div>
+    
+    <script>
+    // Show connection info
+    document.getElementById('connection_info').innerHTML = 
+        'Host: ' + window.location.hostname + ' | Port: ' + (window.location.port || '80/443');
+    </script>
 </body>
 </html>
 EOF
 
-# Create SIMPLE vnc.html that works
-RUN cat > /opt/novnc/vnc.html << 'EOF'
+# Create SIMPLE vnc_lite.html with same-port connection
+RUN cat > /opt/novnc/vnc_lite.html << 'EOF'
 <!DOCTYPE html>
 <html>
 <head>
-    <title>noVNC</title>
+    <title>noVNC Lite</title>
     <meta charset="utf-8">
     <script src="app/ui.js"></script>
     <script>
     window.addEventListener('load', function() {
-        const url = new URL(window.location.href);
-        const host = url.hostname;
-        
-        // Auto-connect
-        UI.connect(host, '10000', 'password123', 'websockify');
+        // Connect to WebSocket on SAME PORT as the page
+        const host = window.location.hostname;
+        UI.connect(host, '', 'password123', 'websockify');
     });
     </script>
 </head>
@@ -146,18 +162,19 @@ RUN cat > /opt/novnc/vnc.html << 'EOF'
 </html>
 EOF
 
-# Create startup script with SSL/TLS
+# Create startup script - ONLY USE PORT 8080 (Render-accessible)
 RUN cat > /start.sh << 'EOF'
 #!/bin/bash
 
-echo "=== STARTING VNC DESKTOP (WITH SSL) ==="
+echo "=== STARTING VNC DESKTOP FOR RENDER ==="
+echo "Using port 8080 for both HTTP and WebSocket"
 
 # Clean up
 pkill -9 x11vnc 2>/dev/null || true
 pkill -9 Xvfb 2>/dev/null || true
 pkill -9 python3 2>/dev/null || true
 fuser -k 5901/tcp 2>/dev/null || true
-fuser -k 10000/tcp 2>/dev/null || true
+fuser -k 8080/tcp 2>/dev/null || true
 rm -rf /tmp/.X11-unix/* /tmp/.X*-lock 2>/dev/null || true
 
 # Start Xvfb
@@ -176,34 +193,35 @@ echo "3. Starting x11vnc on port 5901"
 x11vnc -display :99 -forever -shared -rfbauth /root/.vnc/passwd -rfbport 5901 -bg
 sleep 2
 
-# Start websockify WITH SSL/TLS (CRITICAL FOR RENDER HTTPS)
-echo "4. Starting websockify WITH SSL on port 10000"
+# CRITICAL: Start websockify on PORT 8080 (not 10000)
+echo "4. Starting websockify WITH SSL on port 8080"
 cd /opt/novnc/utils/websockify
-python3 -m websockify --web /opt/novnc --cert ./self.pem 0.0.0.0:10000 localhost:5901 &
+# Use --web for serving HTML, --cert for SSL, port 8080 for WebSocket
+python3 -m websockify --web /opt/novnc --cert ./self.pem 0.0.0.0:8080 localhost:5901 &
 sleep 3
-
-# Start simple Python HTTP server on 8080 (optional fallback)
-echo "5. Starting HTTP server on 8080"
-cd /opt/novnc
-python3 -m http.server 8080 &
-sleep 2
 
 # Verification
 echo ""
 echo "=== STATUS ==="
-echo "x11vnc (5901):     $(netstat -tuln | grep :5901 >/dev/null && echo '✓ LISTENING' || echo '✗ NOT LISTENING')"
-echo "websockify (10000): $(netstat -tuln | grep :10000 >/dev/null && echo '✓ LISTENING' || echo '✗ NOT LISTENING')"
-echo "HTTP (8080):       $(netstat -tuln | grep :8080 >/dev/null && echo '✓ LISTENING' || echo '✗ NOT LISTENING')"
+echo "x11vnc (5901):      $(netstat -tuln | grep :5901 >/dev/null && echo '✓ LISTENING' || echo '✗ NOT LISTENING')"
+echo "websockify (8080):  $(netstat -tuln | grep :8080 >/dev/null && echo '✓ LISTENING' || echo '✗ NOT LISTENING')"
 echo ""
-echo "=== ACCESS YOUR DESKTOP ==="
-echo "MAIN URL (Use this): https://${RENDER_EXTERNAL_HOSTNAME:-localhost}/"
-echo "ALTERNATIVE: https://${RENDER_EXTERNAL_HOSTNAME:-localhost}/vnc.html"
-echo "ALTERNATIVE: https://${RENDER_EXTERNAL_HOSTNAME:-localhost}/vnc_lite.html"
+echo "=== HOW RENDER WORKS ==="
+echo "1. You visit: https://rdp-00jy.onrender.com"
+echo "2. Render routes to port 8080 in container"
+echo "3. WebSocket connects to wss://rdp-00jy.onrender.com/websockify"
+echo "4. All traffic goes through port 8080"
 echo ""
-echo "PASSWORD: $VNC_PASSWD"
+echo "=== ACCESS NOW ==="
+echo "1. Main: https://${RENDER_EXTERNAL_HOSTNAME:-localhost}/"
+echo "2. Lite: https://${RENDER_EXTERNAL_HOSTNAME:-localhost}/vnc_lite.html"
 echo ""
-echo "If still 'loading', check browser console (F12) for WebSocket errors"
-echo "=============================================="
+echo "Password: $VNC_PASSWD"
+echo ""
+echo "=== TROUBLESHOOTING ==="
+echo "If still 'Connecting...', open browser console (F12)"
+echo "Look for WebSocket connection errors"
+echo "========================================="
 
 # Keep container alive
 tail -f /dev/null
@@ -211,6 +229,7 @@ EOF
 
 RUN chmod +x /start.sh
 
-EXPOSE 10000 8080
+# EXPOSE ONLY 8080 - Render will use this
+EXPOSE 8080
 
 CMD ["/start.sh"]

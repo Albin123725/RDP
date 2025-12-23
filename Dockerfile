@@ -14,7 +14,7 @@ ENV VNC_DEPTH=16
 RUN ln -fs /usr/share/zoneinfo/Asia/Kolkata /etc/localtime && \
     echo "Asia/Kolkata" > /etc/timezone
 
-# Install core packages including TigerVNC (better than tightvnc)
+# Install core packages - using x11vnc which is simpler
 RUN apt update && apt install -y \
     xfce4 \
     xfce4-terminal \
@@ -22,8 +22,8 @@ RUN apt update && apt install -y \
     xfdesktop4 \
     thunar \
     firefox \
-    tigervnc-standalone-server \
-    tigervnc-common \
+    x11vnc \
+    xvfb \
     wget \
     net-tools \
     x11-xserver-utils \
@@ -55,31 +55,10 @@ RUN wget -q https://github.com/novnc/noVNC/archive/refs/tags/v1.4.0.tar.gz -O /t
     mv /opt/novnc/utils/websockify-0.11.0 /opt/novnc/utils/websockify && \
     rm /tmp/websockify.tar.gz
 
-# Setup VNC for TigerVNC
+# Create VNC password file for x11vnc
 RUN mkdir -p /root/.vnc && \
-    echo "$VNC_PASSWD" | vncpasswd -f > /root/.vnc/passwd && \
+    x11vnc -storepasswd "$VNC_PASSWD" /root/.vnc/passwd 2>/dev/null || echo "$VNC_PASSWD" > /root/.vnc/passwd && \
     chmod 600 /root/.vnc/passwd
-
-# Create proper xstartup for Xfce with TigerVNC
-RUN cat > /root/.vnc/xstartup << 'EOF'
-#!/bin/bash
-unset SESSION_MANAGER
-unset DBUS_SESSION_BUS_ADDRESS
-xrdb $HOME/.Xresources
-xsetroot -solid grey
-vncconfig -iconic &
-startxfce4 &
-EOF
-
-RUN chmod +x /root/.vnc/xstartup
-
-# Create TigerVNC config
-RUN cat > /root/.vnc/config << 'EOF'
-geometry=${VNC_RESOLUTION}
-depth=${VNC_DEPTH}
-localhost=no
-alwaysshared=yes
-EOF
 
 # Configure Firefox for low memory
 RUN mkdir -p /root/.mozilla/firefox/default && \
@@ -93,51 +72,67 @@ EOF
 # Copy noVNC HTML files
 RUN cp /opt/novnc/vnc_lite.html /opt/novnc/index.html
 
-# Create startup script for TigerVNC
+# Create startup script for x11vnc
 RUN cat > /start.sh << 'EOF'
 #!/bin/bash
 
 # Set DISPLAY variable
-export DISPLAY=:1
+export DISPLAY=:99
 
-# Kill any existing VNC server
-vncserver -kill :1 2>/dev/null || true
-rm -rf /tmp/.X1-lock /tmp/.X11-unix/X1 2>/dev/null || true
+# Start Xvfb (virtual framebuffer)
+echo "Starting Xvfb on display :99"
+Xvfb :99 -screen 0 ${VNC_RESOLUTION}x${VNC_DEPTH} &
+XVFB_PID=$!
 
-# Start VNC server using TigerVNC
-echo "Starting TigerVNC server with resolution: ${VNC_RESOLUTION}"
-vncserver :1 -geometry ${VNC_RESOLUTION} -depth ${VNC_DEPTH} -localhost no
-
-# Check if VNC is running
+# Wait for Xvfb to start
 sleep 2
-if pgrep -f "Xvnc" > /dev/null; then
-    echo "VNC server is running"
-    echo "VNC port: 5901"
-else
-    echo "ERROR: VNC server failed to start"
-    # Try alternative startup method
-    echo "Trying alternative startup..."
-    /usr/bin/Xvnc :1 -geometry ${VNC_RESOLUTION} -depth ${VNC_DEPTH} -rfbwait 30000 -SecurityTypes VncAuth -PasswordFile /root/.vnc/passwd -AlwaysShared &
-    sleep 3
-    if pgrep -f "Xvnc" > /dev/null; then
-        echo "VNC server started via alternative method"
-    else
-        exit 1
-    fi
-fi
+
+# Start Xfce
+echo "Starting Xfce desktop"
+export DISPLAY=:99
+startxfce4 &
+XFCE_PID=$!
+
+# Wait for Xfce to start
+sleep 3
+
+# Start x11vnc
+echo "Starting x11vnc server"
+x11vnc -display :99 -forever -shared -rfbauth /root/.vnc/passwd -bg -rfbport 5901 -logfile /var/log/x11vnc.log &
+X11VNC_PID=$!
 
 # Start noVNC
 echo "Starting noVNC on port 10000"
 /opt/novnc/utils/novnc_proxy --vnc localhost:5901 --listen 0.0.0.0:10000 --web /opt/novnc &
+NOVNC_PID=$!
 
-echo "=========================================="
-echo "VNC Desktop is ready!"
-echo "Access at: https://${RENDER_EXTERNAL_HOSTNAME:-localhost}/vnc_lite.html"
-echo "Password: $VNC_PASSWD"
-echo "=========================================="
+# Check if services are running
+if ps -p $XVFB_PID > /dev/null && ps -p $X11VNC_PID > /dev/null; then
+    echo "=========================================="
+    echo "VNC Desktop is ready!"
+    echo "Access at: https://${RENDER_EXTERNAL_HOSTNAME:-localhost}/vnc_lite.html"
+    echo "Password: $VNC_PASSWD"
+    echo "=========================================="
+else
+    echo "ERROR: Some services failed to start"
+    exit 1
+fi
 
-# Keep container running
-tail -f /dev/null
+# Keep container running and monitor processes
+while true; do
+    if ! ps -p $XVFB_PID > /dev/null; then
+        echo "Xvfb died, restarting..."
+        Xvfb :99 -screen 0 ${VNC_RESOLUTION}x${VNC_DEPTH} &
+        XVFB_PID=$!
+        sleep 2
+    fi
+    if ! ps -p $X11VNC_PID > /dev/null; then
+        echo "x11vnc died, restarting..."
+        x11vnc -display :99 -forever -shared -rfbauth /root/.vnc/passwd -bg -rfbport 5901 &
+        X11VNC_PID=$!
+    fi
+    sleep 10
+done
 EOF
 
 RUN chmod +x /start.sh

@@ -14,7 +14,7 @@ ENV VNC_DEPTH=16
 RUN ln -fs /usr/share/zoneinfo/Asia/Kolkata /etc/localtime && \
     echo "Asia/Kolkata" > /etc/timezone
 
-# Install minimal packages
+# Install packages - add a few missing ones
 RUN apt update && apt install -y \
     fluxbox \
     xterm \
@@ -29,17 +29,18 @@ RUN apt update && apt install -y \
     python3 \
     python3-numpy \
     dbus-x11 \
+    xmessage \
     --no-install-recommends && \
     apt clean && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-# Install noVNC properly - using the websockify package
+# Install noVNC
 RUN wget -q https://github.com/novnc/noVNC/archive/refs/tags/v1.4.0.tar.gz -O /tmp/novnc.tar.gz && \
     tar -xzf /tmp/novnc.tar.gz -C /opt/ && \
     mv /opt/noVNC-1.4.0 /opt/novnc && \
     rm /tmp/novnc.tar.gz
 
-# Install websockify separately
+# Install websockify
 RUN wget -q https://github.com/novnc/websockify/archive/refs/tags/v0.11.0.tar.gz -O /tmp/websockify.tar.gz && \
     tar -xzf /tmp/websockify.tar.gz -C /opt/ && \
     mv /opt/websockify-0.11.0 /opt/websockify && \
@@ -50,7 +51,7 @@ RUN mkdir -p /root/.vnc && \
     echo "$VNC_PASSWD" > /root/.vnc/passwd && \
     chmod 600 /root/.vnc/passwd
 
-# Configure Firefox for low memory
+# Configure Firefox
 RUN mkdir -p /root/.mozilla/firefox/default && \
     cat > /root/.mozilla/firefox/default/prefs.js << 'EOF'
 user_pref("app.update.auto", false);
@@ -71,10 +72,26 @@ RUN mkdir -p /root/.fluxbox && \
 [end]
 EOF
 
+# Create simple fluxbox startup file
+RUN cat > /root/.fluxbox/startup << 'EOF'
+#!/bin/sh
+# fluxbox startup script
+
+# Set background color
+fbsetbg -solid "#2d2d2d"
+
+# Start applications
+xterm -geometry 80x24+10+10 &
+thunar &
+firefox &
+EOF
+
+RUN chmod +x /root/.fluxbox/startup
+
 # Copy noVNC HTML files
 RUN cp /opt/novnc/vnc_lite.html /opt/novnc/index.html
 
-# Create a simple Python script to run websockify
+# Create Python script for noVNC
 RUN cat > /opt/novnc/start-novnc.py << 'EOF'
 #!/usr/bin/env python3
 import sys
@@ -93,53 +110,73 @@ RUN chmod +x /opt/novnc/start-novnc.py
 RUN cat > /start.sh << 'EOF'
 #!/bin/bash
 
-# Kill any existing processes
-pkill -f "x11vnc" 2>/dev/null || true
-pkill -f "Xvfb" 2>/dev/null || true
-pkill -f "websockify" 2>/dev/null || true
-pkill -f "fluxbox" 2>/dev/null || true
-pkill -f "start-novnc" 2>/dev/null || true
+# Clean up
+rm -rf /tmp/.X11-unix/X99 /tmp/.X99-lock 2>/dev/null || true
 
-# Set DISPLAY variable
+# Set DISPLAY
 export DISPLAY=:99
 
 # Start Xvfb
 echo "Starting Xvfb on display :99"
 Xvfb :99 -screen 0 ${VNC_RESOLUTION}x${VNC_DEPTH} &
+XVFB_PID=$!
 
-# Wait for Xvfb to start
+# Wait for Xvfb
 sleep 3
+
+# Verify Xvfb is running
+if ! ps -p $XVFB_PID > /dev/null; then
+    echo "ERROR: Xvfb failed to start"
+    exit 1
+fi
 
 # Start fluxbox
 echo "Starting Fluxbox"
 fluxbox &
+FLUXBOX_PID=$!
 
-# Start applications
-echo "Starting applications"
 sleep 2
-xterm -geometry 80x24+10+10 &
-thunar &
-firefox &
 
 # Start x11vnc
-echo "Starting x11vnc server on port 5901"
+echo "Starting x11vnc on port 5901"
 x11vnc -display :99 -forever -shared -rfbauth /root/.vnc/passwd -bg -rfbport 5901 -noxdamage -nowf -noscr -cursor arrow
+X11VNC_PID=$!
 
-# Start noVNC using our Python script
+sleep 2
+
+# Check if x11vnc is running
+if ! pgrep -x "x11vnc" > /dev/null; then
+    echo "ERROR: x11vnc failed to start"
+    exit 1
+fi
+
+# Start noVNC
 echo "Starting noVNC on port 10000"
 cd /opt/novnc
 python3 start-novnc.py &
+NOVNC_PID=$!
 
-# Wait a bit
 sleep 3
+
+# Check if noVNC is running
+if ! ps -p $NOVNC_PID > /dev/null; then
+    echo "ERROR: noVNC failed to start"
+    exit 1
+fi
 
 echo "=========================================="
 echo "VNC Desktop is ready!"
 echo "Access at: https://${RENDER_EXTERNAL_HOSTNAME:-localhost}/vnc_lite.html"
+echo "or: https://${RENDER_EXTERNAL_HOSTNAME:-localhost}/"
 echo "Password: $VNC_PASSWD"
 echo "=========================================="
+echo "Services running:"
+echo "- Xvfb (PID: $XVFB_PID)"
+echo "- Fluxbox (PID: $FLUXBOX_PID)" 
+echo "- x11vnc (PID: $X11VNC_PID)"
+echo "- noVNC (PID: $NOVNC_PID)"
 
-# Keep container running
+# Keep running
 tail -f /dev/null
 EOF
 

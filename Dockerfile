@@ -40,16 +40,19 @@ RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key
     && apt-get install -y google-chrome-stable \
     && rm -rf /var/lib/apt/lists/*
 
+# Install ChromeDriver
+RUN wget -q https://storage.googleapis.com/chrome-for-testing-public/119.0.6045.105/linux64/chromedriver-linux64.zip \
+    && unzip chromedriver-linux64.zip \
+    && mv chromedriver-linux64/chromedriver /usr/local/bin/ \
+    && rm -rf chromedriver-linux64.zip chromedriver-linux64
+
 # Install Python dependencies
+WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Create app directory
-WORKDIR /app
-
-# Copy application
+# Copy only the Python file
 COPY app.py .
-COPY templates/ ./templates/
 
 # Create non-root user
 RUN useradd -m -u 1000 browseruser

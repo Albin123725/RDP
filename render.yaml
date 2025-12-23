@@ -5,11 +5,10 @@ services:
     dockerfilePath: ./Dockerfile
     plan: free
     autoDeploy: true
-    healthCheckPath: /vnc_lite.html
-    # Add a health check command that verifies WebSocket is working
+    # Change health check to just root path
     healthCheckPath: /
-    # Optional: Add startup probe delay
-    # initialDelaySeconds: 30
+    # Add longer timeout
+    # healthCheckTimeout: 60
     envVars:
       - key: VNC_RESOLUTION
         value: "1024x576"

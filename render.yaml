@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: real-browser-rdp
+    name: real-browser
     env: docker
     dockerfilePath: ./Dockerfile
     plan: free
@@ -9,3 +9,7 @@ services:
         value: 8080
     healthCheckPath: /health
     autoDeploy: true
+    disk:
+      name: chrome-data
+      mountPath: /data
+      sizeGB: 1

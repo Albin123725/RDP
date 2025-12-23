@@ -71,7 +71,7 @@ RUN mkdir -p /root/.fluxbox && \
 [end]
 EOF
 
-# Create simple fluxbox startup file without fbsetbg
+# Create simple fluxbox startup file
 RUN cat > /root/.fluxbox/startup << 'EOF'
 #!/bin/sh
 # fluxbox startup script
@@ -87,7 +87,7 @@ RUN chmod +x /root/.fluxbox/startup
 # Copy noVNC HTML files
 RUN cp /opt/novnc/vnc_lite.html /opt/novnc/index.html
 
-# Create Python script for noVNC
+# Create Python script for noVNC with IP address instead of localhost
 RUN cat > /opt/novnc/start-novnc.py << 'EOF'
 #!/usr/bin/env python3
 import sys
@@ -96,13 +96,14 @@ sys.path.insert(0, '/opt/websockify')
 from websockify.websocketproxy import WebSocketProxy
 
 if __name__ == '__main__':
-    sys.argv = ['websockify', '--web', '/opt/novnc', '0.0.0.0:10000', 'localhost:5901']
+    # Use 127.0.0.1 instead of localhost to avoid DNS resolution issues
+    sys.argv = ['websockify', '--web', '/opt/novnc', '0.0.0.0:10000', '127.0.0.1:5901']
     WebSocketProxy().start_server()
 EOF
 
 RUN chmod +x /opt/novnc/start-novnc.py
 
-# Create startup script
+# Create startup script with better error handling
 RUN cat > /start.sh << 'EOF'
 #!/bin/bash
 
@@ -136,7 +137,6 @@ sleep 2
 # Start x11vnc
 echo "Starting x11vnc on port 5901"
 x11vnc -display :99 -forever -shared -rfbauth /root/.vnc/passwd -bg -rfbport 5901 -noxdamage -nowf -noscr -cursor arrow
-X11VNC_PID=$!
 
 sleep 2
 
@@ -155,9 +155,13 @@ NOVNC_PID=$!
 sleep 3
 
 # Check if noVNC is running
-if ! ps -p $NOVNC_PID > /dev/null; then
-    echo "ERROR: noVNC failed to start"
-    exit 1
+if ! ps -p $NOVNC_PID > /dev/null 2>&1; then
+    echo "WARNING: noVNC may have issues, trying alternative method..."
+    # Try running websockify directly
+    cd /opt/websockify
+    python3 -m websockify.websocketproxy --web /opt/novnc 0.0.0.0:10000 127.0.0.1:5901 &
+    NOVNC_PID=$!
+    sleep 2
 fi
 
 echo "=========================================="
@@ -166,11 +170,13 @@ echo "Access at: https://${RENDER_EXTERNAL_HOSTNAME:-localhost}/vnc_lite.html"
 echo "or: https://${RENDER_EXTERNAL_HOSTNAME:-localhost}/"
 echo "Password: $VNC_PASSWD"
 echo "=========================================="
-echo "Services running:"
-echo "- Xvfb (PID: $XVFB_PID)"
-echo "- Fluxbox (PID: $FLUXBOX_PID)" 
-echo "- x11vnc"
-echo "- noVNC (PID: $NOVNC_PID)"
+
+# Test if port 10000 is listening
+if netstat -tuln | grep -q ":10000"; then
+    echo "noVNC is listening on port 10000"
+else
+    echo "WARNING: Port 10000 is not listening"
+fi
 
 # Keep running
 tail -f /dev/null

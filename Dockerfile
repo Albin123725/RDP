@@ -40,7 +40,7 @@ RUN apt purge -y \
     apt autoremove -y && \
     apt autoclean
 
-# Install noVNC from source (better compatibility)
+# Install noVNC from source
 RUN wget -q https://github.com/novnc/noVNC/archive/refs/tags/v1.4.0.tar.gz -O /tmp/novnc.tar.gz && \
     tar -xzf /tmp/novnc.tar.gz -C /opt/ && \
     mv /opt/noVNC-1.4.0 /opt/novnc && \
@@ -50,7 +50,7 @@ RUN wget -q https://github.com/novnc/noVNC/archive/refs/tags/v1.4.0.tar.gz -O /t
     mv /opt/novnc/utils/websockify-0.11.0 /opt/novnc/utils/websockify && \
     rm /tmp/websockify.tar.gz
 
-# Setup VNC
+# Setup VNC - create passwd file first
 RUN mkdir -p /root/.vnc && \
     echo "$VNC_PASSWD" | vncpasswd -f > /root/.vnc/passwd && \
     chmod 600 /root/.vnc/passwd
@@ -58,11 +58,13 @@ RUN mkdir -p /root/.vnc && \
 # Create proper xstartup for Xfce
 RUN cat > /root/.vnc/xstartup << 'EOF'
 #!/bin/bash
-xrdb $HOME/.Xresources
+unset SESSION_MANAGER
+unset DBUS_SESSION_BUS_ADDRESS
+[ -x /etc/vnc/xstartup ] && exec /etc/vnc/xstartup
+[ -r $HOME/.Xresources ] && xrdb $HOME/.Xresources
 xsetroot -solid grey
-export XKL_XMODMAP_DISABLE=1
-export XDG_CURRENT_DESKTOP="XFCE"
-exec startxfce4
+vncconfig -iconic &
+startxfce4 &
 EOF
 
 RUN chmod +x /root/.vnc/xstartup
@@ -70,19 +72,16 @@ RUN chmod +x /root/.vnc/xstartup
 # Create a simple .Xresources file
 RUN echo "Xft.dpi: 96" > /root/.Xresources
 
+# Fix the font path issue in vncserver
+RUN sed -i 's|^.*\$fontPath.*=.*|$fontPath = "";|' /usr/bin/vncserver
+
 # Configure Firefox for low memory
 RUN mkdir -p /root/.mozilla/firefox/default && \
     cat > /root/.mozilla/firefox/default/prefs.js << 'EOF'
 user_pref("app.update.auto", false);
 user_pref("app.update.enabled", false);
 user_pref("browser.startup.page", 0);
-user_pref("browser.sessionstore.resume_from_crash", false);
-user_pref("browser.sessionstore.max_tabs_undo", 0);
-user_pref("browser.sessionstore.max_windows_undo", 0);
-user_pref("browser.sessionstore.restore_on_demand", false);
 user_pref("dom.ipc.processCount", 1);
-user_pref("media.autoplay.enabled", false);
-user_pref("media.webspeech.synth.enabled", false);
 EOF
 
 # Copy noVNC HTML files
@@ -96,16 +95,41 @@ RUN cat > /start.sh << 'EOF'
 vncserver -kill :1 2>/dev/null || true
 rm -rf /tmp/.X1-lock /tmp/.X11-unix/X1 2>/dev/null || true
 
-# Start VNC server
+# Generate .Xauthority file
+touch /root/.Xauthority
+xauth generate :1 . trusted 2>/dev/null || true
+
+# Start VNC server with correct options
 echo "Starting VNC server with resolution: ${VNC_RESOLUTION}"
-vncserver :1 -geometry ${VNC_RESOLUTION} -depth ${VNC_DEPTH} -localhost no
+# First run to create config
+vncserver :1 -geometry ${VNC_RESOLUTION} -depth ${VNC_DEPTH} 2>&1 | tee /tmp/vnc-start.log
+
+# Kill and restart with proper settings
+vncserver -kill :1 2>/dev/null || true
+sleep 2
+
+# Start final VNC server
+vncserver :1 -geometry ${VNC_RESOLUTION} -depth ${VNC_DEPTH} -localhost no 2>&1 | tee /tmp/vnc-final.log
+
+# Check if VNC is running
+if netstat -tuln | grep -q ":5901"; then
+    echo "VNC server is running on port 5901"
+else
+    echo "ERROR: VNC server failed to start"
+    cat /tmp/vnc-start.log
+    cat /tmp/vnc-final.log
+    exit 1
+fi
 
 # Start noVNC
 echo "Starting noVNC on port 10000"
 /opt/novnc/utils/novnc_proxy --vnc localhost:5901 --listen 0.0.0.0:10000 --web /opt/novnc &
 
-echo "VNC and noVNC are running"
-echo "Connect via: http://$(hostname -i):10000"
+echo "=========================================="
+echo "VNC Desktop is ready!"
+echo "Access at: https://${RENDER_EXTERNAL_HOSTNAME:-localhost}/vnc_lite.html"
+echo "Password: $VNC_PASSWD"
+echo "=========================================="
 
 # Keep container running
 tail -f /dev/null

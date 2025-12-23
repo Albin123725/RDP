@@ -14,7 +14,7 @@ ENV VNC_DEPTH=16
 RUN ln -fs /usr/share/zoneinfo/Asia/Kolkata /etc/localtime && \
     echo "Asia/Kolkata" > /etc/timezone
 
-# Install core packages including X11 fonts
+# Install core packages including TigerVNC (better than tightvnc)
 RUN apt update && apt install -y \
     xfce4 \
     xfce4-terminal \
@@ -22,14 +22,14 @@ RUN apt update && apt install -y \
     xfdesktop4 \
     thunar \
     firefox \
-    tightvncserver \
+    tigervnc-standalone-server \
+    tigervnc-common \
     wget \
     net-tools \
     x11-xserver-utils \
     xfonts-base \
     xfonts-100dpi \
     xfonts-75dpi \
-    xfonts-cyrillic \
     --no-install-recommends && \
     apt clean && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
@@ -55,12 +55,12 @@ RUN wget -q https://github.com/novnc/noVNC/archive/refs/tags/v1.4.0.tar.gz -O /t
     mv /opt/novnc/utils/websockify-0.11.0 /opt/novnc/utils/websockify && \
     rm /tmp/websockify.tar.gz
 
-# Setup VNC
+# Setup VNC for TigerVNC
 RUN mkdir -p /root/.vnc && \
     echo "$VNC_PASSWD" | vncpasswd -f > /root/.vnc/passwd && \
     chmod 600 /root/.vnc/passwd
 
-# Create proper xstartup for Xfce
+# Create proper xstartup for Xfce with TigerVNC
 RUN cat > /root/.vnc/xstartup << 'EOF'
 #!/bin/bash
 unset SESSION_MANAGER
@@ -73,9 +73,13 @@ EOF
 
 RUN chmod +x /root/.vnc/xstartup
 
-# Fix the font path issue in vncserver - properly this time
-RUN sed -i '/\$fontPath =/s/^/#/' /usr/bin/vncserver && \
-    echo '$fontPath = "";' >> /usr/bin/vncserver
+# Create TigerVNC config
+RUN cat > /root/.vnc/config << 'EOF'
+geometry=${VNC_RESOLUTION}
+depth=${VNC_DEPTH}
+localhost=no
+alwaysshared=yes
+EOF
 
 # Configure Firefox for low memory
 RUN mkdir -p /root/.mozilla/firefox/default && \
@@ -89,7 +93,7 @@ EOF
 # Copy noVNC HTML files
 RUN cp /opt/novnc/vnc_lite.html /opt/novnc/index.html
 
-# Create startup script
+# Create startup script for TigerVNC
 RUN cat > /start.sh << 'EOF'
 #!/bin/bash
 
@@ -100,18 +104,26 @@ export DISPLAY=:1
 vncserver -kill :1 2>/dev/null || true
 rm -rf /tmp/.X1-lock /tmp/.X11-unix/X1 2>/dev/null || true
 
-# Start VNC server
-echo "Starting VNC server with resolution: ${VNC_RESOLUTION}"
-vncserver :1 -geometry ${VNC_RESOLUTION} -depth ${VNC_DEPTH} -SecurityTypes VncAuth
+# Start VNC server using TigerVNC
+echo "Starting TigerVNC server with resolution: ${VNC_RESOLUTION}"
+vncserver :1 -geometry ${VNC_RESOLUTION} -depth ${VNC_DEPTH} -localhost no
 
 # Check if VNC is running
 sleep 2
-if pgrep -f "Xtightvnc" > /dev/null; then
+if pgrep -f "Xvnc" > /dev/null; then
     echo "VNC server is running"
     echo "VNC port: 5901"
 else
     echo "ERROR: VNC server failed to start"
-    exit 1
+    # Try alternative startup method
+    echo "Trying alternative startup..."
+    /usr/bin/Xvnc :1 -geometry ${VNC_RESOLUTION} -depth ${VNC_DEPTH} -rfbwait 30000 -SecurityTypes VncAuth -PasswordFile /root/.vnc/passwd -AlwaysShared &
+    sleep 3
+    if pgrep -f "Xvnc" > /dev/null; then
+        echo "VNC server started via alternative method"
+    else
+        exit 1
+    fi
 fi
 
 # Start noVNC

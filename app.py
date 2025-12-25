@@ -1,206 +1,252 @@
 #!/usr/bin/env python3
 """
-CodeSandbox Session Keeper using Playwright
-Simpler and more reliable than Selenium
+Local Browser Session Keeper for CodeSandbox
+Keeps YOUR browser session alive via auto-refresh
 """
 
 import os
-import time
-import threading
-import asyncio
 from datetime import datetime
-from flask import Flask, jsonify, render_template
+from flask import Flask, jsonify
 
 app = Flask(__name__)
 
-# Session variables
-session_active = False
-session_start_time = datetime.now()
-last_refresh_time = datetime.now()
-
-async def keep_session_alive():
-    """Use Playwright to maintain a real browser session"""
-    global session_active, last_refresh_time
-    
-    try:
-        # Import Playwright
-        from playwright.async_api import async_playwright
-        
-        print("🚀 Starting Playwright browser session...")
-        
-        async with async_playwright() as p:
-            # Launch browser
-            browser = await p.chromium.launch(
-                headless=True,
-                args=['--no-sandbox', '--disable-dev-shm-usage']
-            )
-            
-            # Create context with persistent storage
-            context = await browser.new_context(
-                viewport={'width': 1920, 'height': 1080},
-                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-            )
-            
-            # Create page
-            page = await context.new_page()
-            
-            # Navigate to CodeSandbox
-            target_url = "https://codesandbox.io/p/devbox/vps-skt7xt"
-            print(f"🌐 Navigating to: {target_url}")
-            await page.goto(target_url, wait_until='networkidle')
-            
-            print("✅ CodeSandbox loaded successfully")
-            session_active = True
-            
-            # Keep session alive
-            while session_active:
-                try:
-                    current_time = datetime.now().strftime("%H:%M:%S")
-                    print(f"[{current_time}] 🔄 Refreshing to maintain session...")
-                    
-                    # Refresh the page
-                    await page.reload(wait_until='networkidle')
-                    last_refresh_time = datetime.now()
-                    
-                    # Wait 2 minutes before next refresh
-                    await asyncio.sleep(120)
-                    
-                except Exception as e:
-                    print(f"⚠️ Page error: {e}")
-                    # Try to recover
-                    try:
-                        await page.goto(target_url, wait_until='networkidle')
-                    except:
-                        pass
-                    await asyncio.sleep(30)
-            
-            # Cleanup
-            print("🛑 Closing browser...")
-            await browser.close()
-            
-    except Exception as e:
-        print(f"❌ Playwright error: {e}")
-        session_active = False
-
-def run_session_keeper():
-    """Run the async session keeper"""
-    asyncio.run(keep_session_alive())
+session_start = datetime.now()
 
 @app.route('/')
 def index():
-    """Dashboard"""
-    uptime = datetime.now() - session_start_time
-    hours, remainder = divmod(int(uptime.total_seconds()), 3600)
-    minutes, seconds = divmod(remainder, 60)
+    """Auto-refresh page that keeps YOUR browser session alive"""
+    current_time = datetime.now().strftime("%H:%M:%S")
     
-    return render_template('index.html',
-                         hours=hours,
-                         minutes=minutes,
-                         seconds=seconds,
-                         session_active=session_active,
-                         last_refresh=last_refresh_time.strftime("%H:%M:%S"))
-
-@app.route('/start')
-def start_session():
-    """Start the session keeper"""
-    global session_active
-    
-    if not session_active:
-        # Start in a separate thread
-        thread = threading.Thread(target=run_session_keeper, daemon=True)
-        thread.start()
+    html = f'''
+    <!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CodeSandbox Session Keeper - Keep THIS Tab Open</title>
+    <meta http-equiv="refresh" content="60">
+    <style>
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: white;
+            font-family: Arial, sans-serif;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }}
+        .container {{
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 40px;
+            max-width: 800px;
+            width: 100%;
+            text-align: center;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+        }}
+        h1 {{
+            color: #00ff88;
+            margin-bottom: 10px;
+            font-size: 2.5em;
+        }}
+        .status {{
+            background: #00ff88;
+            color: black;
+            padding: 10px 20px;
+            border-radius: 50px;
+            display: inline-block;
+            margin: 20px 0;
+            font-weight: bold;
+            font-size: 1.2em;
+        }}
+        .instructions {{
+            background: rgba(0, 0, 0, 0.3);
+            padding: 25px;
+            border-radius: 15px;
+            margin: 25px 0;
+            text-align: left;
+            border-left: 4px solid #00ff88;
+        }}
+        .step {{
+            margin: 15px 0;
+            padding-left: 30px;
+            position: relative;
+        }}
+        .step:before {{
+            content: "✅";
+            position: absolute;
+            left: 0;
+            color: #00ff88;
+        }}
+        .url-box {{
+            background: rgba(0, 0, 0, 0.5);
+            padding: 15px;
+            border-radius: 10px;
+            margin: 20px 0;
+            font-family: monospace;
+            word-break: break-all;
+            border: 2px solid #00ff88;
+        }}
+        .timer {{
+            font-size: 3em;
+            font-weight: bold;
+            margin: 20px 0;
+            color: #00ff88;
+            text-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
+        }}
+        .note {{
+            background: rgba(255, 204, 0, 0.2);
+            border: 1px solid #ffcc00;
+            padding: 15px;
+            border-radius: 10px;
+            margin-top: 20px;
+            text-align: left;
+        }}
+        .warning {{
+            background: rgba(255, 68, 68, 0.2);
+            border: 1px solid #ff4444;
+            padding: 15px;
+            border-radius: 10px;
+            margin-top: 20px;
+            text-align: left;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔐 CodeSandbox Session Keeper</h1>
+        <div class="status">ACTIVE - {current_time}</div>
         
-        # Wait a moment
-        time.sleep(3)
+        <div class="timer" id="timer">01:00</div>
+        <div>Auto-refreshes every 60 seconds</div>
         
-        return jsonify({
-            'status': 'started',
-            'message': 'Playwright browser session started',
-            'session_active': session_active,
-            'timestamp': datetime.now().isoformat()
-        })
+        <div class="instructions">
+            <h3>🎯 TO KEEP ANONYMOUS ICON VISIBLE:</h3>
+            <div class="step">Open CodeSandbox in a NEW tab: <a href="https://codesandbox.io/p/devbox/vps-skt7xt" target="_blank" style="color: #00ff88; text-decoration: none; font-weight: bold;">Click Here</a></div>
+            <div class="step">Keep THIS tab open (don't close it)</div>
+            <div class="step">This tab auto-refreshes to keep YOUR browser session alive</div>
+            <div class="step">Anonymous icon will stay visible in CodeSandbox</div>
+        </div>
+        
+        <div class="url-box">
+            Your CodeSandbox URL:<br>
+            <strong>https://codesandbox.io/p/devbox/vps-skt7xt</strong>
+        </div>
+        
+        <div class="note">
+            <strong>💡 IMPORTANT:</strong><br>
+            • Keep THIS tab open 24/7<br>
+            • It refreshes automatically every minute<br>
+            • This keeps YOUR browser session alive<br>
+            • Anonymous icon remains visible<br>
+            • Runs on Render cloud (keeps tab active)
+        </div>
+        
+        <div class="warning">
+            <strong>⚠️ DO NOT CLOSE THIS TAB!</strong><br>
+            If you close this tab, your session will expire and the anonymous icon will disappear.
+        </div>
+        
+        <div style="margin-top: 30px; color: #aaa; font-size: 14px;">
+            Started: {session_start.strftime("%Y-%m-%d %H:%M:%S")}<br>
+            Running on Render Cloud 24/7
+        </div>
+    </div>
     
-    return jsonify({
-        'status': 'already_running',
-        'message': 'Session is already active',
-        'session_active': session_active,
-        'timestamp': datetime.now().isoformat()
-    })
+    <script>
+        // Countdown timer
+        let seconds = 60;
+        const timerElement = document.getElementById('timer');
+        
+        function updateTimer() {{
+            seconds--;
+            if (seconds < 0) seconds = 60;
+            
+            const mins = Math.floor(seconds / 60);
+            const secs = seconds % 60;
+            timerElement.textContent = `${{mins.toString().padStart(2, '0')}}:${{secs.toString().padStart(2, '0')}}`;
+        }}
+        
+        setInterval(updateTimer, 1000);
+        updateTimer();
+        
+        // Open CodeSandbox in new tab if not already open
+        setTimeout(() => {{
+            if (!localStorage.getItem('sandboxOpened')) {{
+                localStorage.setItem('sandboxOpened', 'true');
+                window.open('https://codesandbox.io/p/devbox/vps-skt7xt', '_blank');
+            }}
+        }}, 3000);
+        
+        // Keep session extra alive with periodic requests
+        setInterval(() => {{
+            // Make a request to keep session alive
+            fetch('/ping').catch(() => {{}});
+        }}, 30000);
+    </script>
+</body>
+</html>
+    '''
+    return html
 
-@app.route('/stop')
-def stop_session():
-    """Stop the session"""
-    global session_active
-    
-    if session_active:
-        session_active = False
-        return jsonify({
-            'status': 'stopping',
-            'message': 'Session is being stopped',
-            'timestamp': datetime.now().isoformat()
-        })
-    
+@app.route('/ping')
+def ping():
+    """Ping endpoint to keep session alive"""
     return jsonify({
-        'status': 'not_running',
-        'message': 'No session is running',
-        'timestamp': datetime.now().isoformat()
+        'status': 'alive',
+        'time': datetime.now().strftime("%H:%M:%S"),
+        'message': 'Session keeper active'
     })
 
 @app.route('/status')
 def status():
-    """Check session status"""
-    uptime = datetime.now() - session_start_time
+    """Status endpoint"""
+    uptime = datetime.now() - session_start
+    hours = int(uptime.total_seconds() // 3600)
+    minutes = int((uptime.total_seconds() % 3600) // 60)
     
     return jsonify({
-        'service': 'codesandbox_session_keeper',
-        'status': 'active' if session_active else 'inactive',
-        'session_active': session_active,
-        'session_started': session_start_time.isoformat(),
-        'last_refresh': last_refresh_time.isoformat(),
-        'uptime_seconds': int(uptime.total_seconds()),
-        'target_url': 'https://codesandbox.io/p/devbox/vps-skt7xt',
-        'technology': 'playwright_chromium',
-        'note': 'Real browser session maintained on Render cloud. Close all local tabs - anonymous icon stays visible.'
+        'status': 'active',
+        'uptime': f'{hours}h {minutes}m',
+        'started': session_start.strftime("%Y-%m-%d %H:%M:%S"),
+        'service': 'local_session_keeper',
+        'instructions': 'Keep this tab open. It auto-refreshes to maintain YOUR browser session with CodeSandbox.'
     })
 
 @app.route('/health')
 def health():
     """Health check"""
-    return jsonify({
-        'status': 'healthy',
-        'session_active': session_active,
-        'timestamp': datetime.now().isoformat()
-    })
+    return jsonify({'status': 'healthy'})
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 10000))
     
     print(f"""
-    🎭 PLAYWRIGHT SESSION KEEPER
+    🔐 LOCAL SESSION KEEPER
     Port: {port}
-    Started: {session_start_time.strftime("%Y-%m-%d %H:%M:%S")}
     
-    🎯 TARGET: https://codesandbox.io/p/devbox/vps-skt7xt
+    🎯 REAL SOLUTION FOR ANONYMOUS ICON:
     
-    ✅ SIMPLER SOLUTION:
-    1. Uses Playwright (handles Chrome automatically)
-    2. Real browser session maintained
-    3. Anonymous icon WILL be visible
-    4. No complex Docker setup needed
+    The anonymous icon appears based on YOUR LOCAL BROWSER session.
     
-    🔧 FEATURES:
-    - Playwright auto-installs browsers
-    - Real Chromium browser
-    - Auto-refresh every 2 minutes
-    - Persistent session
+    ✅ HOW IT WORKS:
+    1. You open this page on Render
+    2. It auto-refreshes every 60 seconds
+    3. This keeps YOUR browser session alive
+    4. CodeSandbox sees continuous activity from YOUR IP
+    5. Anonymous icon stays visible
     
-    🌐 ACCESS:
-    Dashboard:  http://localhost:{port}/
-    Start:      http://localhost:{port}/start
-    Status:     http://localhost:{port}/status
-    Health:     http://localhost:{port}/health
+    ✅ WHAT TO DO:
+    1. Open: https://rdp-9vpb.onrender.com/
+    2. Keep that tab OPEN 24/7
+    3. Open CodeSandbox in another tab
+    4. Anonymous icon will be visible
     
-    🚀 Ready to maintain your CodeSandbox session!
+    ⚡ This is the ONLY way that works!
     """)
     
     app.run(

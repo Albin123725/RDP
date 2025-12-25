@@ -1,7 +1,3 @@
-
-## **Updated `app.py`**:
-
-```python
 #!/usr/bin/env python3
 """
 Lightweight Browser for Modern Web Apps
@@ -488,8 +484,8 @@ def direct_url(url):
     <head>
         <title>Direct Browser Access</title>
         <style>
-            body {{ margin: 0; padding: 20px; font-family: Arial, sans-serif; }}
-            iframe {{ width: 100%; height: 90vh; border: none; }}
+            body { margin: 0; padding: 20px; font-family: Arial, sans-serif; }
+            iframe { width: 100%; height: 90vh; border: none; }
         </style>
     </head>
     <body>

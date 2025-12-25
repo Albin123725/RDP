@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: lightweight-browser
+    name: cloud-browser-simple
     env: python
     plan: free
     buildCommand: pip install -r requirements.txt

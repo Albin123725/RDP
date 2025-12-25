@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CodeSandbox Session Keeper - 24/7</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: white;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .container {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 40px;
+            max-width: 800px;
+            width: 100%;
+            text-align: center;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+        }
+        h1 {
+            color: #00d4ff;
+            margin-bottom: 10px;
+            font-size: 2.5em;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 15px;
+        }
+        .subtitle {
+            color: #94a3b8;
+            margin-bottom: 30px;
+            font-size: 1.1em;
+        }
+        .status-card {
+            background: rgba(16, 185, 129, 0.1);
+            border: 2px solid #10b981;
+            border-radius: 15px;
+            padding: 25px;
+            margin: 20px 0;
+            text-align: left;
+        }
+        .status-card h3 {
+            color: #10b981;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .status-item {
+            display: flex;
+            justify-content: space-between;
+            margin: 10px 0;
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .url-display {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 15px;
+            border-radius: 10px;
+            margin: 20px 0;
+            font-family: monospace;
+            word-break: break-all;
+            border-left: 4px solid #3b82f6;
+        }
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin: 30px 0;
+        }
+        .feature {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 20px;
+            border-radius: 10px;
+            text-align: left;
+        }
+        .feature h4 {
+            color: #60a5fa;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .uptime {
+            font-size: 2.5em;
+            font-weight: bold;
+            color: #00d4ff;
+            margin: 20px 0;
+            text-shadow: 0 0 10px rgba(0, 212, 255, 0.5);
+        }
+        .note {
+            background: rgba(245, 158, 11, 0.1);
+            border: 1px solid #f59e0b;
+            border-radius: 10px;
+            padding: 15px;
+            margin-top: 20px;
+            text-align: left;
+        }
+        .note h4 {
+            color: #f59e0b;
+            margin-bottom: 10px;
+        }
+        .refresh-btn {
+            background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 20px;
+            transition: all 0.3s;
+        }
+        .refresh-btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 20px rgba(59, 130, 246, 0.4);
+        }
+        .cloud-badge {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 10px 20px;
+            border-radius: 50px;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            backdrop-filter: blur(10px);
+        }
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.7; }
+            100% { opacity: 1; }
+        }
+        .pulse {
+            animation: pulse 2s infinite;
+        }
+    </style>
+</head>
+<body>
+    <div class="cloud-badge">
+        <span>☁️</span>
+        <span>RENDER CLOUD</span>
+        <span style="background: #10b981; padding: 2px 8px; border-radius: 4px; font-size: 12px;">ACTIVE</span>
+    </div>
+    
+    <div class="container">
+        <h1>
+            <span>🔐</span>
+            <span>CodeSandbox Session Keeper</span>
+        </h1>
+        <div class="subtitle">Keeps your anonymous icon visible 24/7 on the cloud</div>
+        
+        <div class="uptime" id="uptime">
+            {{ hours }}:{{ minutes }}:{{ seconds }}
+        </div>
+        <div style="color: #94a3b8; margin-bottom: 20px;">Session Uptime</div>
+        
+        <div class="url-display">
+            🎯 Target URL: https://codesandbox.io/p/devbox/vps-skt7xt
+        </div>
+        
+        <div class="status-card">
+            <h3><span>✅</span> Session Status</h3>
+            <div class="status-item">
+                <span>Cloud Service:</span>
+                <span style="color: #10b981; font-weight: bold;">ACTIVE</span>
+            </div>
+            <div class="status-item">
+                <span>Last Ping:</span>
+                <span>{{ last_ping }}</span>
+            </div>
+            <div class="status-item">
+                <span>Anonymous Icon:</span>
+                <span style="color: #10b981; font-weight: bold;">VISIBLE</span>
+            </div>
+        </div>
+        
+        <div class="features">
+            <div class="feature">
+                <h4><span>☁️</span> Cloud Hosted</h4>
+                <p>Runs 24/7 on Render cloud. No local resources needed.</p>
+            </div>
+            <div class="feature">
+                <h4><span>👤</span> Anonymous Icon</h4>
+                <p>Keeps the anonymous/user icon visible in CodeSandbox.</p>
+            </div>
+            <div class="feature">
+                <h4><span>🔄</span> Auto Maintain</h4>
+                <p>Automatically pings every 30 seconds to keep session alive.</p>
+            </div>
+            <div class="feature">
+                <h4><span>📴</span> No Browser Needed</h4>
+                <p>Close all browser tabs - session continues on cloud.</p>
+            </div>
+        </div>
+        
+        <div class="note">
+            <h4><span>💡</span> How This Works</h4>
+            <p>This cloud service runs independently on Render. It maintains a continuous session that CodeSandbox recognizes. Even when you close ALL browser tabs on your computer, the session continues in the cloud, keeping your anonymous icon visible.</p>
+        </div>
+        
+        <button class="refresh-btn" onclick="refreshStatus()">
+            🔄 Refresh Status
+        </button>
+    </div>
+    
+    <script>
+        // Update uptime counter
+        function updateUptime() {
+            const uptimeElement = document.getElementById('uptime');
+            let [hours, minutes, seconds] = uptimeElement.textContent.split(':').map(Number);
+            
+            seconds++;
+            if (seconds >= 60) {
+                seconds = 0;
+                minutes++;
+            }
+            if (minutes >= 60) {
+                minutes = 0;
+                hours++;
+            }
+            
+            uptimeElement.textContent = 
+                `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        }
+        
+        // Update every second
+        setInterval(updateUptime, 1000);
+        
+        // Refresh status
+        function refreshStatus() {
+            fetch('/status')
+                .then(response => response.json())
+                .then(data => {
+                    alert(`✅ Session Status:\n\n` +
+                          `Status: ${data.status}\n` +
+                          `Uptime: ${Math.floor(data.uptime_seconds / 3600)}h ${Math.floor((data.uptime_seconds % 3600) / 60)}m\n` +
+                          `Last Ping: ${new Date(data.last_ping).toLocaleTimeString()}\n` +
+                          `Anonymous Icon: VISIBLE\n\n` +
+                          `This service runs independently on the cloud. Close all browser tabs - it continues running!`);
+                });
+        }
+        
+        // Auto-refresh status every minute
+        setInterval(() => {
+            fetch('/status').catch(() => {}); // Silent ping
+        }, 60000);
+        
+        // Initial status check
+        setTimeout(refreshStatus, 2000);
+    </script>
+</body>
+</html>

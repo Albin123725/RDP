@@ -1,9 +1,13 @@
 services:
   - type: web
-    name: codesandbox-real-browser
-    env: docker
-    dockerfilePath: ./Dockerfile
+    name: codesandbox-playwright
+    env: python
     plan: free
+    buildCommand: |
+      pip install -r requirements.txt
+      playwright install chromium
+      playwright install-deps
+    startCommand: python app.py
     envVars:
       - key: PORT
         value: 10000

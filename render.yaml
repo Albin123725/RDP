@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: cloud-browser-simple
+    name: codesandbox-session-keeper
     env: python
     plan: free
     buildCommand: pip install -r requirements.txt

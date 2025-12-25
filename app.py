@@ -1,3 +1,7 @@
+
+## **Updated `app.py`**:
+
+```python
 #!/usr/bin/env python3
 """
 Lightweight Browser for Modern Web Apps
@@ -19,6 +23,7 @@ HTML = '''<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="refresh" content="180"> <!-- Auto-refresh every 3 minutes -->
     <title>Lightweight Web Browser</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -126,7 +131,7 @@ HTML = '''<!DOCTYPE html>
         <button class="btn" onclick="goForward()" id="forwardBtn" disabled>→</button>
         <button class="btn" onclick="reloadPage()">↻</button>
         <input type="text" class="url-bar" id="urlInput" 
-               placeholder="Enter website URL (e.g., https://mln49z-8888.csb.app/tree?)">
+               placeholder="Enter website URL (e.g., https://codesandbox.io/p/devbox/vps-skt7xt)">
         <button class="btn" onclick="navigate()" id="goBtn">Go</button>
     </div>
     
@@ -146,6 +151,7 @@ HTML = '''<!DOCTYPE html>
     <div class="status-bar">
         <div><span class="status-dot"></span> <span id="statusText">Ready</span></div>
         <div>Browser: <span id="browserInfo">Lightweight</span></div>
+        <div>Auto-refresh: <span id="refreshTimer">3:00</span></div>
     </div>
 
     <script>
@@ -156,13 +162,40 @@ HTML = '''<!DOCTYPE html>
         const backBtn = document.getElementById('backBtn');
         const forwardBtn = document.getElementById('forwardBtn');
         const browserInfo = document.getElementById('browserInfo');
+        const refreshTimer = document.getElementById('refreshTimer');
         
         let currentUrl = '';
         let canGoBack = false;
         let canGoForward = false;
+        let refreshCountdown = 180; // 3 minutes in seconds
+        let refreshInterval;
         
         // Set initial URL
-        urlInput.value = 'https://mln49z-8888.csb.app/tree?';
+        urlInput.value = 'https://codesandbox.io/p/devbox/vps-skt7xt';
+        
+        // Start refresh countdown
+        function startRefreshTimer() {
+            clearInterval(refreshInterval);
+            refreshCountdown = 180;
+            updateTimerDisplay();
+            
+            refreshInterval = setInterval(() => {
+                refreshCountdown--;
+                updateTimerDisplay();
+                
+                if (refreshCountdown <= 0) {
+                    clearInterval(refreshInterval);
+                    reloadPage();
+                    startRefreshTimer(); // Restart timer after refresh
+                }
+            }, 1000);
+        }
+        
+        function updateTimerDisplay() {
+            const minutes = Math.floor(refreshCountdown / 60);
+            const seconds = refreshCountdown % 60;
+            refreshTimer.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+        }
         
         // Resize iframe to fit container
         function resizeIframe() {
@@ -203,6 +236,9 @@ HTML = '''<!DOCTYPE html>
                 // Update buttons
                 updateHistoryButtons();
                 
+                // Reset refresh timer
+                startRefreshTimer();
+                
             } catch (error) {
                 alert('Invalid URL: ' + error.message);
             }
@@ -225,6 +261,9 @@ HTML = '''<!DOCTYPE html>
                 browserFrame.src = browserFrame.src;
                 statusText.textContent = 'Reloading...';
                 loading.style.display = 'block';
+                
+                // Reset refresh timer
+                startRefreshTimer();
             }
         }
         
@@ -333,6 +372,7 @@ HTML = '''<!DOCTYPE html>
         window.addEventListener('load', () => {
             setTimeout(() => {
                 navigate(); // Auto-navigate to the initial URL
+                startRefreshTimer(); // Start the auto-refresh timer
             }, 500);
         });
         
@@ -347,11 +387,11 @@ HTML = '''<!DOCTYPE html>
 def index():
     """Main browser interface"""
     # Get URL from query parameter or use default
-    url = request.args.get('url', 'https://mln49z-8888.csb.app/tree?')
+    url = request.args.get('url', 'https://codesandbox.io/p/devbox/vps-skt7xt')
     
     # Create modified HTML with the URL pre-filled
     modified_html = HTML.replace(
-        'urlInput.value = \'https://mln49z-8888.csb.app/tree?\';',
+        'urlInput.value = \'https://codesandbox.io/p/devbox/vps-skt7xt\';',
         f'urlInput.value = \'{url}\';'
     )
     
@@ -398,10 +438,11 @@ def api_info():
         'version': '1.0',
         'status': 'running',
         'timestamp': datetime.now().isoformat(),
-        'features': ['iframe-browsing', 'url-navigation', 'keyboard-shortcuts'],
+        'features': ['iframe-browsing', 'url-navigation', 'keyboard-shortcuts', 'auto-refresh'],
         'memory_usage': 'low',
         'compatible_with': ['Render Free Tier', 'Python 3.7+'],
-        'default_url': 'https://mln49z-8888.csb.app/tree?'
+        'default_url': 'https://codesandbox.io/p/devbox/vps-skt7xt',
+        'auto_refresh_seconds': 180
     })
 
 @app.route('/open')
@@ -470,11 +511,12 @@ if __name__ == '__main__':
     - Works with JavaScript sites
     - No heavy dependencies
     - Perfect for Render Free Tier
+    - Auto-refresh every 3 minutes
     
     🔗 Access URLs:
     Main interface: http://localhost:{port}/
-    Your URL: http://localhost:{port}/?url=https://mln49z-8888.csb.app/tree?
-    Direct: http://localhost:{port}/direct/https://mln49z-8888.csb.app/tree?
+    Your URL: http://localhost:{port}/?url=https://codesandbox.io/p/devbox/vps-skt7xt
+    Direct: http://localhost:{port}/direct/https://codesandbox.io/p/devbox/vps-skt7xt
     
     ⚡ Memory: ~50MB (Very lightweight)
     """)

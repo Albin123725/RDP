@@ -6,9 +6,7 @@ services:
     plan: free
     autoDeploy: true
     healthCheckPath: /vnc_lite.html
-    port: 10000  # THIS IS CRITICAL
+    port: 10000
     envVars:
       - key: VNC_PASSWD
         value: "password123"
-      - key: ENABLE_SWAP
-        value: "true"

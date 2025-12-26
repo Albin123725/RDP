@@ -39,13 +39,17 @@ RUN apt install -y \
     python3-numpy \
     --no-install-recommends
 
-# Install Firefox browser with minimal dependencies
+# Install Firefox browser with all necessary dependencies
 RUN apt install -y \
     firefox \
     fonts-liberation \
     libasound2 \
     libdbus-glib-1-2 \
     libgtk-3-0 \
+    libxt6 \
+    libx11-xcb1 \
+    libdrm2 \
+    libgbm1 \
     --no-install-recommends
 
 # Clean up in separate steps to avoid issues
@@ -68,19 +72,24 @@ RUN mkdir -p /root/.vnc && \
     printf "${VNC_PASSWD}\n${VNC_PASSWD}\nn\n" | vncpasswd && \
     chmod 600 /root/.vnc/passwd
 
-# Create optimized xstartup with Firefox properly integrated
+# Create optimized xstartup with memory-saving options
 RUN cat > /root/.vnc/xstartup << 'EOF'
 #!/bin/bash
 unset SESSION_MANAGER
 unset DBUS_SESSION_BUS_ADDRESS
 export DISPLAY=:1
 export HOME=/root
+export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u)/bus"
 
 [ -x /etc/vnc/xstartup ] && exec /etc/vnc/xstartup
 [ -r $HOME/.Xresources ] && xrdb $HOME/.Xresources
 
 xsetroot -solid grey
 vncconfig -iconic &
+
+# Start DBus
+mkdir -p /run/dbus
+dbus-daemon --system --fork
 
 # Disable composite manager to save memory
 xfwm4 --compositor=off &
@@ -92,32 +101,14 @@ xfce4-panel &
 # Start desktop
 xfdesktop &
 
-# Create Applications directory structure for Firefox
-mkdir -p /root/.local/share/applications
-cat > /root/.local/share/applications/firefox.desktop << 'DESKTOP'
-[Desktop Entry]
-Version=1.0
-Name=Firefox Web Browser
-Name[en]=Firefox Web Browser
-Comment=Browse the World Wide Web
-Comment[en]=Browse the World Wide Web
-Exec=firefox %u
-Terminal=false
-Type=Application
-Icon=firefox
-Categories=Network;WebBrowser;
-MimeType=text/html;text/xml;application/xhtml+xml;application/xml;application/vnd.mozilla.xul+xml;application/rss+xml;application/rdf+xml;image/gif;image/jpeg;image/png;x-scheme-handler/http;x-scheme-handler/https;
-StartupNotify=true
-StartupWMClass=Firefox
-DESKTOP
-
-update-desktop-database /root/.local/share/applications
+# Wait for desktop to initialize
+sleep 2
 
 EOF
 
 RUN chmod +x /root/.vnc/xstartup
 
-# Create desktop shortcut for Firefox
+# Create desktop shortcut for Firefox (with sandbox disabled)
 RUN mkdir -p /root/Desktop && \
     cat > /root/Desktop/firefox.desktop << 'EOF'
 [Desktop Entry]
@@ -125,7 +116,7 @@ Version=1.0
 Type=Application
 Name=Firefox Browser
 Comment=Open Firefox Browser
-Exec=firefox
+Exec=firefox --no-sandbox
 Icon=firefox
 Terminal=false
 StartupNotify=true
@@ -134,20 +125,60 @@ EOF
 
 RUN chmod +x /root/Desktop/firefox.desktop
 
-# Create a simple test script to verify Firefox works
-RUN cat > /root/test-firefox.sh << 'EOF'
+# Create a panel launcher for Firefox
+RUN mkdir -p /root/.config/xfce4/panel && \
+    cat > /root/.config/xfce4/panel/whiskermenu-1.rc << 'EOF'
+[Configuration]
+button-title=Applications
+button-icon=applications-other
+show-button-title=false
+launcher-show-name=true
+launcher-show-description=true
+position-search-alternate=false
+position-commands-alternate=false
+position-categories-alternate=false
+position-recents-alternate=false
+category-search=false
+load-hierarchy=false
+recent-items-max=10
+favorites-launcher-0=/root/Desktop/firefox.desktop
+EOF
+
+# Create Firefox configuration to disable sandbox
+RUN mkdir -p /root/.mozilla && \
+    cat > /root/.mozilla/firefox-prefs.js << 'EOF'
+// Disable sandbox for container environment
+pref("security.sandbox.content.level", 0);
+pref("security.sandbox.gpu.level", 0);
+pref("browser.tabs.remote.autostart", false);
+pref("browser.tabs.remote.autostart.2", false);
+EOF
+
+# Create a simple launcher script for Firefox
+RUN cat > /usr/local/bin/launch-firefox << 'EOF'
 #!/bin/bash
 export DISPLAY=:1
 export HOME=/root
-if command -v firefox &> /dev/null; then
-    echo "Firefox is installed at: $(which firefox)"
-    echo "Firefox version: $(firefox --version 2>/dev/null || echo "Could not get version")"
-else
-    echo "Firefox is not installed or not in PATH"
-fi
+export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u)/bus"
+/usr/bin/firefox --no-sandbox --new-instance "$@" &
 EOF
 
-RUN chmod +x /root/test-firefox.sh
+RUN chmod +x /usr/local/bin/launch-firefox
+
+# Create a test HTML file to open
+RUN cat > /root/test.html << 'EOF'
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Page</title>
+</head>
+<body>
+    <h1>Firefox Test Page</h1>
+    <p>If you can see this, Firefox is working!</p>
+    <p><a href="https://google.com">Test Google Link</a></p>
+</body>
+</html>
+EOF
 
 # Get noVNC (manual installation to ensure latest version)
 RUN wget -q https://github.com/novnc/noVNC/archive/refs/tags/v1.4.0.tar.gz -O /tmp/novnc.tar.gz && \
@@ -188,10 +219,13 @@ CMD echo "Starting VNC server..." && \
     # Start VNC server without the problematic -fp option
     vncserver :1 -geometry ${VNC_RESOLUTION} -depth ${VNC_DEPTH} && \
     echo "VNC started successfully on display :1" && \
-    echo "Firefox installation check:" && \
-    /root/test-firefox.sh && \
+    echo "Setting up Firefox..." && \
+    # Start DBus for Firefox
+    mkdir -p /run/dbus && \
+    dbus-daemon --system --fork && \
     echo "Starting noVNC proxy..." && \
     # Start noVNC proxy
     /opt/novnc/utils/novnc_proxy --vnc localhost:5901 --listen 0.0.0.0:10000 --heartbeat 30 --web /opt/novnc && \
     echo "noVNC started on port 10000" && \
+    echo "To open Firefox: Click the icon on desktop or run: firefox --no-sandbox" && \
     tail -f /dev/null

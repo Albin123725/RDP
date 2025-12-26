@@ -9,16 +9,10 @@ ENV DISPLAY=:1
 ENV VNC_PASSWD=password123
 ENV VNC_RESOLUTION=1024x576
 ENV VNC_DEPTH=16
-# Memory optimization variables
 ENV ENABLE_SWAP=true
 ENV SWAP_SIZE_GB=8
-ENV OVERCOMMIT_MEMORY=1
 
-# Set timezone
-RUN ln -fs /usr/share/zoneinfo/Asia/Kolkata /etc/localtime && \
-    echo "Asia/Kolkata" > /etc/timezone
-
-# === PHASE 1: Install with aggressive cleanup ===
+# Install minimal packages
 RUN apt update && apt install -y \
     xfce4 \
     xfce4-goodies \
@@ -29,213 +23,122 @@ RUN apt update && apt install -y \
     sudo \
     dbus-x11 \
     x11-utils \
-    x11-xserver-utils \
-    xfonts-base \
     gcc \
     python3 \
     python3-pip \
     htop \
     neofetch \
     stress-ng \
+    net-tools \
     --no-install-recommends && \
     apt clean && \
-    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* && \
-    rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/locale/* && \
-    apt purge -y xfce4-screensaver xfce4-power-manager xscreensaver* && \
-    apt autoremove -y && \
-    apt autoclean
+    rm -rf /var/lib/apt/lists/*
 
-# === PHASE 2: Memory optimization setup ===
-# Enable memory overcommit (allows allocating more than available)
+# === MEMORY OPTIMIZATION ===
+# Enable overcommit
 RUN echo "vm.overcommit_memory = 1" >> /etc/sysctl.conf && \
-    echo "vm.overcommit_ratio = 95" >> /etc/sysctl.conf && \
-    echo "vm.swappiness = 10" >> /etc/sysctl.conf
+    echo "vm.overcommit_ratio = 95" >> /etc/sysctl.conf
 
-# Create large swap file (virtual memory)
+# Create swap script
 RUN cat > /create_swap.sh << 'EOF'
 #!/bin/bash
 if [ "$ENABLE_SWAP" = "true" ]; then
-    echo "Creating ${SWAP_SIZE_GB}GB swap file..."
-    fallocate -l ${SWAP_SIZE_GB}G /swapfile || \
-    dd if=/dev/zero of=/swapfile bs=1G count=${SWAP_SIZE_GB}
+    echo "Creating ${SWAP_SIZE_GB}GB swap..."
+    fallocate -l ${SWAP_SIZE_GB}G /swapfile 2>/dev/null || \
+    dd if=/dev/zero of=/swapfile bs=1M count=$((SWAP_SIZE_GB * 1024))
     chmod 600 /swapfile
     mkswap /swapfile
     swapon /swapfile
     echo "/swapfile none swap sw 0 0" >> /etc/fstab
-    echo "Swap created successfully"
+    echo "Swap enabled: ${SWAP_SIZE_GB}GB"
 fi
 EOF
 
-RUN chmod +x /create_swap.sh
+# === VNC SETUP ===
+RUN mkdir -p ~/.vnc && \
+    echo "$VNC_PASSWD" | vncpasswd -f > ~/.vnc/passwd && \
+    chmod 600 ~/.vnc/passwd
 
-# === PHASE 3: Setup VNC ===
-RUN mkdir -p /root/.vnc && \
-    printf "${VNC_PASSWD}\n${VNC_PASSWD}\nn\n" | vncpasswd && \
-    chmod 600 /root/.vnc/passwd
+# Simple xstartup
+RUN echo '#!/bin/bash\nxsetroot -solid grey\nexport XKL_XMODMAP_DISABLE=1\nxfce4-session &' > ~/.vnc/xstartup && \
+    chmod +x ~/.vnc/xstartup
 
-# Optimized xstartup
-RUN cat > /root/.vnc/xstartup << 'EOF'
-#!/bin/bash
-unset SESSION_MANAGER
-unset DBUS_SESSION_BUS_ADDRESS
-[ -x /etc/vnc/xstartup ] && exec /etc/vnc/xstartup
-[ -r $HOME/.Xresources ] && xrdb $HOME/.Xresources
-xsetroot -solid grey
-vncconfig -iconic &
-# Memory-optimized Xfce
-xfwm4 --compositor=off &
-xfsettingsd --daemon
-xfce4-panel &
-xfdesktop &
-EOF
+# === NOVNC SETUP ===
+RUN git clone https://github.com/novnc/noVNC.git /opt/novnc && \
+    git clone https://github.com/novnc/websockify.git /opt/novnc/utils/websockify
 
-RUN chmod +x /root/.vnc/xstartup
-
-# === PHASE 4: Install noVNC ===
-RUN wget -q https://github.com/novnc/noVNC/archive/refs/tags/v1.4.0.tar.gz -O /tmp/novnc.tar.gz && \
-    tar -xzf /tmp/novnc.tar.gz -C /opt/ && \
-    mv /opt/noVNC-1.4.0 /opt/novnc && \
-    rm /tmp/novnc.tar.gz && \
-    wget -q https://github.com/novnc/websockify/archive/refs/tags/v0.11.0.tar.gz -O /tmp/websockify.tar.gz && \
-    tar -xzf /tmp/websockify.tar.gz -C /opt/novnc/utils/ && \
-    mv /opt/novnc/utils/websockify-0.11.0 /opt/novnc/utils/websockify && \
-    rm /tmp/websockify.tar.gz
-
-# === PHASE 5: Resource maximization scripts ===
-# Memory reservation script (uses overcommit)
-RUN cat > /reserve_memory.py << 'EOF'
+# === RESOURCE GRAB SCRIPT ===
+RUN cat > /grab_resources.py << 'EOF'
 #!/usr/bin/env python3
 import mmap
 import time
+import threading
 import sys
-import os
 
-def reserve_memory(target_gb=16):
-    """Reserve memory using mmap with MAP_NORESERVE"""
-    print(f"Attempting to reserve {target_gb}GB of address space...")
-    
+print("=== RESOURCE ALLOCATION STARTED ===")
+
+def allocate_memory(size_mb, name):
+    """Allocate and hold memory"""
     try:
-        # Reserve virtual address space (doesn't use physical memory yet)
-        size = target_gb * 1024 * 1024 * 1024
-        mem = mmap.mmap(-1, size, flags=mmap.MAP_PRIVATE | mmap.MAP_ANONYMOUS)
-        
-        print(f"✓ Reserved {target_gb}GB virtual address space")
-        print("Physical memory will be allocated on-demand")
-        
-        # Commit memory gradually to avoid OOM
-        commit_size = 1024 * 1024  # 1MB chunks
-        committed = 0
-        target_commit = 8 * 1024 * 1024 * 1024  # Commit up to 8GB
-        
-        for i in range(0, min(size, target_commit), commit_size):
-            mem[i] = b'x'  # This commits the page
-            committed += 1
-            
-            if i % (100 * 1024 * 1024) == 0:  # Every 100MB
-                print(f"Committed {committed}MB...")
-                time.sleep(0.1)
-        
-        print(f"✓ Successfully committed {committed}MB")
-        print("Holding memory...")
-        
-        # Keep the memory
-        while True:
-            time.sleep(3600)
-            
-    except Exception as e:
-        print(f"Error: {e}")
-        # Try smaller allocation
-        if target_gb > 4:
-            reserve_memory(target_gb // 2)
+        data = bytearray(size_mb * 1024 * 1024)
+        data[0] = 1
+        data[-1] = 1
+        print(f"{name}: Allocated {size_mb}MB")
+        return data
+    except:
+        print(f"{name}: Failed to allocate {size_mb}MB")
+        return None
 
-if __name__ == "__main__":
-    # Start with 16GB, will reduce if fails
-    reserve_memory(16)
+# Allocate in chunks
+chunks = []
+for i in range(8):  # 8 chunks of 512MB = 4GB
+    chunk = allocate_memory(512, f"Chunk-{i+1}")
+    if chunk:
+        chunks.append(chunk)
+        time.sleep(0.5)
+
+print(f"Total allocated: {len(chunks) * 512}MB")
+print("Holding memory...")
+
+# Keep process alive
+while True:
+    time.sleep(3600)
 EOF
 
-RUN chmod +x /reserve_memory.py
-
-# Process that claims CPU resources
-RUN cat > /claim_cpu.sh << 'EOF'
-#!/bin/bash
-echo "=== CPU Resource Claim ==="
-echo "Starting stress-ng to utilize available CPU..."
-# Use 80% of available CPU cores
-cores=$(nproc)
-stress_cores=$((cores * 80 / 100))
-if [ $stress_cores -lt 1 ]; then
-    stress_cores=1
-fi
-
-# Start stress test in background
-stress-ng --cpu $stress_cores --timeout 0 --metrics-brief &
-echo "CPU stress running on $stress_cores cores"
-EOF
-
-RUN chmod +x /claim_cpu.sh
-
-# === PHASE 6: Startup optimization ===
-# Create optimized startup script
-RUN cat > /startup.sh << 'EOF'
+# === STARTUP SCRIPT ===
+RUN cat > /start.sh << 'EOF'
 #!/bin/bash
 
-echo "=== System Information ==="
-neofetch --stdout
-echo ""
+echo "=== STARTING SYSTEM ==="
 
-# Apply sysctl settings
+# Apply kernel settings
 sysctl -p
 
 # Create swap
-/create_swap.sh
+bash /create_swap.sh
 
-echo "=== Memory Status ==="
+echo "=== MEMORY STATUS ==="
 free -h
-echo ""
 
-# Start memory reservation in background
-echo "Starting memory reservation..."
-python3 /reserve_memory.py &
+echo "=== STARTING RESOURCE ALLOCATION ==="
+python3 /grab_resources.py &
 
-# Start CPU claim
-/claim_cpu.sh &
+echo "=== STARTING VNC ==="
+vncserver :1 -geometry $VNC_RESOLUTION -depth $VNC_DEPTH -localhost no
 
-echo "=== Starting VNC Server ==="
-# Fix font path issue
-sed -i 's/\$fontPath =.*/\$fontPath = "";/' /usr/bin/vncserver
+echo "=== STARTING NOVNC ==="
+/opt/novnc/utils/novnc_proxy --vnc localhost:5901 --listen 0.0.0.0:10000 &
 
-# Start VNC
-vncserver :1 -geometry ${VNC_RESOLUTION} -depth ${VNC_DEPTH} \
-  -noxstartup -xstartup /root/.vnc/xstartup
+echo "=== SYSTEM READY ==="
+echo "VNC Password: $VNC_PASSWD"
+echo "Access URL: https://$(hostname).onrender.com/vnc.html"
 
-echo "VNC started on display :1"
-
-echo "=== Starting noVNC ==="
-/opt/novnc/utils/novnc_proxy \
-  --vnc localhost:5901 \
-  --listen 0.0.0.0:10000 \
-  --heartbeat 30 \
-  --web /opt/novnc &
-
-echo "noVNC started on port 10000"
-echo "Access at: http://[RENDER_URL]/vnc_lite.html"
-echo "Password: ${VNC_PASSWD}"
-
-# Show resource usage
-echo ""
-echo "=== Current Resource Usage ==="
-htop --version >/dev/null 2>&1 && htop -d 10 &
-
-# Keep container alive
+# Keep container running
 tail -f /dev/null
 EOF
 
-RUN chmod +x /startup.sh
-
-# === PHASE 7: Copy noVNC files ===
-RUN cp /opt/novnc/vnc_lite.html /opt/novnc/index.html
+RUN chmod +x /start.sh /create_swap.sh /grab_resources.py
 
 EXPOSE 10000
 
-# Use optimized startup
-CMD ["/bin/bash", "/startup.sh"]
+CMD ["/bin/bash", "/start.sh"]

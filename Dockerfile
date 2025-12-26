@@ -61,11 +61,11 @@ RUN mkdir -p ~/.vnc && \
     echo "$VNC_PASSWD" | vncpasswd -f > ~/.vnc/passwd && \
     chmod 600 ~/.vnc/passwd
 
-# Simple xstartup
-RUN echo '#!/bin/bash
-xsetroot -solid grey
-export XKL_XMODMAP_DISABLE=1
-exec startxfce4' > ~/.vnc/xstartup && \
+# Simple xstartup - CORRECTED SYNTAX
+RUN echo '#!/bin/bash' > ~/.vnc/xstartup && \
+    echo 'xsetroot -solid grey' >> ~/.vnc/xstartup && \
+    echo 'export XKL_XMODMAP_DISABLE=1' >> ~/.vnc/xstartup && \
+    echo 'exec startxfce4' >> ~/.vnc/xstartup && \
     chmod +x ~/.vnc/xstartup
 
 # === NOVNC SETUP ===

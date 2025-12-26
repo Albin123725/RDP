@@ -6,7 +6,7 @@ ENV TZ=Asia/Kolkata
 ENV USER=root
 ENV HOME=/root
 ENV DISPLAY=:1
-ENV VNC_PASSWD=password123
+ENV VNC_PASSWD=albin4242
 ENV VNC_RESOLUTION=1024x576
 # Reduced from 24 to save memory
 ENV VNC_DEPTH=16

@@ -5,11 +5,15 @@ services:
     dockerfilePath: ./Dockerfile
     plan: free
     autoDeploy: true
-    healthCheckPath: /vnc.html  # Changed from /vnc_lite.html
+    healthCheckPath: /vnc.html  # Try this first
+    # If that doesn't work, try:
+    # healthCheckPath: /
+    # Or remove health check completely:
+    # healthCheckPath: null
     envVars:
+      - key: VNC_PASSWD
+        value: "password123"
       - key: VNC_RESOLUTION
-        value: "800x600"  # Reduced for better performance
-      - key: VNC_DEPTH
-        value: "16"
+        value: "1024x768"
     resources:
       memoryMB: 512

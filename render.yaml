@@ -5,19 +5,10 @@ services:
     dockerfilePath: ./Dockerfile
     plan: free
     autoDeploy: true
-    # CHANGED: Use root path for health check
-    healthCheckPath: /
-    # ADD THIS: Port setting is REQUIRED
-    port: 10000
+    healthCheckPath: /vnc_lite.html
+    port: 10000  # THIS IS CRITICAL
     envVars:
-      - key: VNC_RESOLUTION
-        value: "1024x576"
-      - key: VNC_DEPTH
-        value: "16"
       - key: VNC_PASSWD
         value: "password123"
       - key: ENABLE_SWAP
         value: "true"
-      - key: SWAP_SIZE_GB
-        value: "8"
-    # REMOVE memory limit completely

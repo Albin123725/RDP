@@ -1,90 +1,95 @@
 FROM ubuntu:22.04
 
-# Set environment variables
 ENV DEBIAN_FRONTEND=noninteractive \
-    TZ=Asia/Kolkata \
-    USER=root \
-    HOME=/root \
+    TZ=UTC \
     VNC_PASSWD=password123 \
-    VNC_RESOLUTION=800x600 \
-    VNC_DEPTH=16
+    VNC_RESOLUTION=1024x768 \
+    DISPLAY=:1 \
+    LANG=en_US.UTF-8
 
-# Set timezone
-RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
-
-# Install packages
+# Install minimal desktop environment and TigerVNC (more reliable than TightVNC)
 RUN apt-get update && apt-get install -y \
+    tigervnc-standalone-server \
+    tigervnc-common \
     xfce4 \
     xfce4-goodies \
-    tightvncserver \
     firefox \
-    novnc \
-    websockify \
-    net-tools \
-    wget \
     xterm \
-    --no-install-recommends \
+    wget \
+    supervisor \
+    net-tools \
+    locales \
     && rm -rf /var/lib/apt/lists/*
 
-# Set VNC password
-RUN mkdir -p ~/.vnc && \
-    echo "$VNC_PASSWD" | vncpasswd -f > ~/.vnc/passwd && \
-    chmod 600 ~/.vnc/passwd
+# Generate locale
+RUN locale-gen en_US.UTF-8
 
-# Create xstartup file
-RUN echo '#!/bin/bash\nunset SESSION_MANAGER\nunset DBUS_SESSION_BUS_ADDRESS\nstartxfce4 &' > ~/.vnc/xstartup && \
-    chmod +x ~/.vnc/xstartup
+# Create .vnc directory and set password
+RUN mkdir -p /root/.vnc && \
+    echo "$VNC_PASSWD" | vncpasswd -f > /root/.vnc/passwd && \
+    chmod 600 /root/.vnc/passwd
 
-# Copy noVNC files to web directory
-RUN mkdir -p /usr/share/novnc && \
-    cp -r /usr/share/novnc/* /usr/share/novnc/ 2>/dev/null || true
+# Create xstartup for XFCE
+RUN echo '#!/bin/bash\nunset SESSION_MANAGER\nunset DBUS_SESSION_BUS_ADDRESS\nexec startxfce4' > /root/.vnc/xstartup && \
+    chmod +x /root/.vnc/xstartup
 
-# Create a simple index.html for noVNC
-RUN echo '<html><head><meta http-equiv="refresh" content="0; url=/vnc.html" /></head></html>' > /usr/share/novnc/index.html
+# Download and install noVNC
+RUN wget -qO- https://github.com/novnc/noVNC/archive/refs/tags/v1.4.0.tar.gz | tar xz -C /tmp && \
+    mv /tmp/noVNC-1.4.0 /opt/novnc
+
+RUN wget -qO- https://github.com/novnc/websockify/archive/refs/tags/v0.11.0.tar.gz | tar xz -C /tmp && \
+    mv /tmp/websockify-0.11.0 /opt/novnc/utils/websockify
+
+# Create a simple index page
+RUN cp /opt/novnc/vnc_lite.html /opt/novnc/index.html
+
+# Create Firefox desktop shortcut
+RUN mkdir -p /root/Desktop && \
+    echo '[Desktop Entry]\nType=Application\nName=Firefox\nExec=firefox --no-sandbox\nIcon=firefox\nTerminal=false' > /root/Desktop/firefox.desktop && \
+    chmod +x /root/Desktop/firefox.desktop
+
+# Create terminal desktop shortcut
+RUN echo '[Desktop Entry]\nType=Application\nName=Terminal\nExec=xfce4-terminal\nIcon=utilities-terminal\nTerminal=false' > /root/Desktop/terminal.desktop && \
+    chmod +x /root/Desktop/terminal.desktop
 
 # Create startup script
 RUN cat > /start.sh << 'EOF'
 #!/bin/bash
+set -e
 
 echo "=== Starting VNC Desktop ==="
+echo "VNC Password: $VNC_PASSWD"
 echo "Resolution: $VNC_RESOLUTION"
-echo "Password: $VNC_PASSWD"
 
-# Kill any existing VNC session
-vncserver -kill :1 2>/dev/null || true
-rm -rf /tmp/.X1-lock /tmp/.X11-unix/X1
+# Clean up old X server locks
+rm -f /tmp/.X1-lock /tmp/.X11-unix/X1
 
-# Start VNC server
-echo "Starting VNC server on :1..."
+# Start TigerVNC server
+echo "Starting VNC server..."
 vncserver :1 \
-  -geometry $VNC_RESOLUTION \
-  -depth $VNC_DEPTH \
-  -localhost no \
-  -AlwaysShared \
-  -AcceptKeyEvents \
-  -AcceptPointerEvents \
-  -AcceptSetDesktopSize \
-  -SendCutText \
-  -AcceptCutText \
-  -rfbauth ~/.vnc/passwd
+    -geometry $VNC_RESOLUTION \
+    -depth 24 \
+    -localhost no \
+    -SecurityTypes VncAuth \
+    -fg \
+    -xstartup /root/.vnc/xstartup &
 
-echo "VNC server started on port 5901"
+# Wait for VNC server to start
+sleep 3
 
-# Wait for VNC to be ready
-sleep 2
+# Start noVNC WebSocket proxy
+echo "Starting noVNC websocket proxy on port 8080..."
+/opt/novnc/utils/novnc_proxy \
+    --vnc localhost:5901 \
+    --listen 0.0.0.0:8080 \
+    --heartbeat 30 \
+    --web /opt/novnc &
 
-# Start noVNC websocket proxy
-echo "Starting noVNC on port 8080..."
-websockify --web /usr/share/novnc 8080 localhost:5900 &
-
-# Alternative: Use python websockify if available
-# python3 -m websockify --web /usr/share/novnc 8080 localhost:5900 &
-
-echo "=========================================="
-echo "VNC Desktop is ready!"
-echo "Connect via: http://$(hostname -i):8080/vnc.html"
-echo "Password: $VNC_PASSWD"
-echo "=========================================="
+echo "========================================="
+echo "VNC Server is running!"
+echo "Connect via: http://localhost:8080/vnc.html"
+echo "VNC Password: $VNC_PASSWD"
+echo "========================================="
 
 # Keep container running
 tail -f /dev/null

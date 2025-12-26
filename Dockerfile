@@ -40,9 +40,9 @@ RUN apt install -y \
     python3-numpy \
     --no-install-recommends
 
-# Install lightweight browser (Midori is not in default Ubuntu 22.04 repo, use Firefox ESR instead)
+# Install Firefox browser (regular version, not ESR)
 RUN apt install -y \
-    firefox-esr \
+    firefox \
     fonts-liberation \
     --no-install-recommends
 

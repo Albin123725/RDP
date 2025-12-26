@@ -15,13 +15,14 @@ ENV VNC_DEPTH=16
 RUN ln -fs /usr/share/zoneinfo/Asia/Kolkata /etc/localtime && \
     echo "Asia/Kolkata" > /etc/timezone
 
-# Install minimal required packages and clean up aggressively
-RUN apt update && apt install -y \
+# Update package lists first
+RUN apt update && apt upgrade -y
+
+# Install core desktop and VNC components first
+RUN apt install -y \
     xfce4 \
     xfce4-goodies \
     tightvncserver \
-    novnc \
-    websockify \
     wget \
     sudo \
     dbus-x11 \
@@ -30,21 +31,32 @@ RUN apt update && apt install -y \
     xfonts-base \
     xfonts-100dpi \
     xfonts-75dpi \
-    # ADDED: Lightweight browser and essential web dependencies
-    midori \
+    --no-install-recommends
+
+# Install noVNC components
+RUN apt install -y \
+    novnc \
+    websockify \
+    python3-numpy \
+    --no-install-recommends
+
+# Install lightweight browser (Midori is not in default Ubuntu 22.04 repo, use Firefox ESR instead)
+RUN apt install -y \
+    firefox-esr \
     fonts-liberation \
-    libgtk-3-0 \
-    libnss3 \
-    libxss1 \
-    libasound2 \
-    --no-install-recommends && \
-    apt clean && \
-    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* && \
-    # Remove unnecessary documentation and locales
-    rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/locale/* && \
-    # Remove Xfce components that aren't essential
-    apt purge -y xfce4-screensaver xfce4-power-manager xscreensaver* && \
-    apt autoremove -y && \
+    --no-install-recommends
+
+# Clean up in separate steps to avoid issues
+RUN apt clean && \
+    rm -rf /var/lib/apt/lists/* && \
+    rm -rf /tmp/* /var/tmp/*
+
+# Remove unnecessary documentation and locales
+RUN rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/locale/*
+
+# Remove unnecessary Xfce components
+RUN apt purge -y xfce4-screensaver xfce4-power-manager xscreensaver* && \
+    apt autoremove -y --purge && \
     apt autoclean
 
 # Setup VNC password with less memory-intensive settings
@@ -71,7 +83,7 @@ EOF
 
 RUN chmod +x /root/.vnc/xstartup
 
-# Get noVNC
+# Get noVNC (manual installation to ensure latest version)
 RUN wget -q https://github.com/novnc/noVNC/archive/refs/tags/v1.4.0.tar.gz -O /tmp/novnc.tar.gz && \
     tar -xzf /tmp/novnc.tar.gz -C /opt/ && \
     mv /opt/noVNC-1.4.0 /opt/novnc && \

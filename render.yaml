@@ -11,5 +11,10 @@ services:
         value: "1024x576"
       - key: VNC_DEPTH
         value: "16"
-    resources:
-      memoryMB: 512
+      # Add swap variables
+      - key: ENABLE_SWAP
+        value: "true"
+      - key: SWAP_SIZE_GB
+        value: "8"
+    # REMOVED: resources: memoryMB: 512
+    # Don't specify memory limit - let Render assign default

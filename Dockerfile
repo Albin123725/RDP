@@ -12,14 +12,16 @@ ENV VNC_DEPTH=16
 ENV ENABLE_SWAP=true
 ENV SWAP_SIZE_GB=8
 
-# Install minimal packages
+# Install ALL required packages including git
 RUN apt update && apt install -y \
+    git \
     xfce4 \
     xfce4-goodies \
     tightvncserver \
     novnc \
     websockify \
     wget \
+    curl \
     sudo \
     dbus-x11 \
     x11-utils \
@@ -60,10 +62,14 @@ RUN mkdir -p ~/.vnc && \
     chmod 600 ~/.vnc/passwd
 
 # Simple xstartup
-RUN echo '#!/bin/bash\nxsetroot -solid grey\nexport XKL_XMODMAP_DISABLE=1\nxfce4-session &' > ~/.vnc/xstartup && \
+RUN echo '#!/bin/bash
+xsetroot -solid grey
+export XKL_XMODMAP_DISABLE=1
+exec startxfce4' > ~/.vnc/xstartup && \
     chmod +x ~/.vnc/xstartup
 
 # === NOVNC SETUP ===
+# Clone noVNC and websockify
 RUN git clone https://github.com/novnc/noVNC.git /opt/novnc && \
     git clone https://github.com/novnc/websockify.git /opt/novnc/utils/websockify
 
@@ -91,13 +97,15 @@ def allocate_memory(size_mb, name):
 
 # Allocate in chunks
 chunks = []
-for i in range(8):  # 8 chunks of 512MB = 4GB
-    chunk = allocate_memory(512, f"Chunk-{i+1}")
+sizes = [256, 512, 768, 1024]  # Try different sizes
+for i, size in enumerate(sizes):
+    chunk = allocate_memory(size, f"Chunk-{i+1}")
     if chunk:
         chunks.append(chunk)
         time.sleep(0.5)
 
-print(f"Total allocated: {len(chunks) * 512}MB")
+total_mb = sum([size for i, size in enumerate(sizes) if i < len(chunks)])
+print(f"Total allocated: {total_mb}MB ({total_mb/1024:.1f}GB)")
 print("Holding memory...")
 
 # Keep process alive
@@ -110,28 +118,43 @@ RUN cat > /start.sh << 'EOF'
 #!/bin/bash
 
 echo "=== STARTING SYSTEM ==="
+echo "Hostname: $(hostname)"
+echo ""
 
 # Apply kernel settings
-sysctl -p
+sysctl -p 2>/dev/null || true
 
 # Create swap
 bash /create_swap.sh
 
 echo "=== MEMORY STATUS ==="
 free -h
+echo ""
 
 echo "=== STARTING RESOURCE ALLOCATION ==="
-python3 /grab_resources.py &
+python3 /grab_resources.py > /tmp/resource.log 2>&1 &
 
 echo "=== STARTING VNC ==="
+# Kill any existing VNC
+vncserver -kill :1 2>/dev/null || true
 vncserver :1 -geometry $VNC_RESOLUTION -depth $VNC_DEPTH -localhost no
 
 echo "=== STARTING NOVNC ==="
-/opt/novnc/utils/novnc_proxy --vnc localhost:5901 --listen 0.0.0.0:10000 &
+# Kill any existing noVNC
+pkill -f novnc_proxy 2>/dev/null || true
+/opt/novnc/utils/novnc_proxy --vnc localhost:5901 --listen 0.0.0.0:10000 --web /opt/novnc > /tmp/novnc.log 2>&1 &
 
 echo "=== SYSTEM READY ==="
 echo "VNC Password: $VNC_PASSWD"
-echo "Access URL: https://$(hostname).onrender.com/vnc.html"
+echo "Access URL: http://$(hostname).onrender.com/vnc_lite.html"
+echo ""
+echo "=== CHECKING SERVICES ==="
+sleep 2
+echo "VNC status: $(netstat -tlnp | grep 5901 && echo "RUNNING" || echo "NOT RUNNING")"
+echo "noVNC status: $(netstat -tlnp | grep 10000 && echo "RUNNING" || echo "NOT RUNNING")"
+echo ""
+echo "=== RESOURCE ALLOCATION LOG ==="
+tail -5 /tmp/resource.log
 
 # Keep container running
 tail -f /dev/null

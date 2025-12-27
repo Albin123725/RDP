@@ -7,14 +7,15 @@ ENV USER=root
 ENV HOME=/root
 ENV DISPLAY=:1
 ENV VNC_PASSWD=password123
-ENV VNC_RESOLUTION=800x600
-ENV VNC_DEPTH=16
+ENV VNC_RESOLUTION=1024x768
+ENV VNC_DEPTH=24
+ENV CHROMIUM_FLAGS="--disable-dev-shm-usage --no-sandbox --disable-gpu --disable-software-rasterizer --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows --disable-breakpad --disable-component-update --disable-features=TranslateUI,BlinkGenPropertyTrees,CalculateNativeWinOcclusion"
 
 # Set timezone
 RUN ln -fs /usr/share/zoneinfo/Asia/Kolkata /etc/localtime && \
     echo "Asia/Kolkata" > /etc/timezone
 
-# Install ONLY bare minimum + lightweight browser
+# Install packages - Chromium + Firefox for compatibility
 RUN apt update && apt install -y \
     xserver-xorg-core \
     xinit \
@@ -22,19 +23,45 @@ RUN apt update && apt install -y \
     novnc \
     websockify \
     wget \
+    curl \
     dbus-x11 \
     x11-utils \
     x11-xserver-utils \
     xfonts-base \
     openbox \
-    dillo \
-    pcmanfm \
+    # Chromium - better for heavy sites
+    chromium-browser \
+    chromium-codecs-ffmpeg \
+    # Firefox as backup
+    firefox-esr \
+    # Required for web apps
+    fonts-liberation \
+    fonts-noto \
+    fonts-noto-cjk \
+    fonts-noto-color-emoji \
+    libnss3 \
+    libxss1 \
+    libasound2 \
+    libgbm1 \
+    libgtk-3-0 \
+    libu2f-udev \
+    libvulkan1 \
+    # Basic utilities
+    htop \
+    nano \
     --no-install-recommends && \
+    
+    # Clean up
     apt clean && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* && \
-    rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/locale/* && \
-    apt purge -y '*xfce*' 'gnome*' 'kde*' || true && \
-    apt purge -y '*terminal*' 'xterm' 'gnome-terminal' 'xfce4-terminal' || true && \
+    
+    # Remove unnecessary packages but keep essentials
+    apt purge -y '*xfce*' 'gnome*' 'kde*' 'libreoffice*' || true && \
+    apt purge -y 'thunderbird*' 'rhythmbox*' 'shotwell*' || true && \
+    
+    # Keep only essential locales
+    find /usr/share/locale -mindepth 1 -maxdepth 1 ! -name "en*" ! -name "C" ! -name "C.UTF-8" -exec rm -rf {} \; 2>/dev/null || true && \
+    
     apt autoremove -y && \
     apt autoclean
 
@@ -43,7 +70,7 @@ RUN mkdir -p /root/.vnc && \
     printf "${VNC_PASSWD}\n${VNC_PASSWD}\nn\n" | vncpasswd && \
     chmod 600 /root/.vnc/passwd
 
-# Create minimal xstartup with Openbox
+# Create xstartup with browser launcher
 RUN cat > /root/.vnc/xstartup << 'EOF'
 #!/bin/bash
 unset SESSION_MANAGER
@@ -52,7 +79,66 @@ unset DBUS_SESSION_BUS_ADDRESS
 [ -r $HOME/.Xresources ] && xrdb $HOME/.Xresources
 xsetroot -solid grey
 vncconfig -iconic &
+
+# Start Openbox
 openbox-session &
+
+# Wait for desktop to initialize
+sleep 2
+
+# Create desktop shortcuts
+cat > /root/Desktop/chromium.desktop << 'DESKEOF'
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Chromium (Fast)
+Comment=Chromium browser for heavy websites
+Exec=chromium-browser %U --disable-dev-shm-usage --no-sandbox --disable-gpu --window-size=1024,768
+Icon=chromium-browser
+Terminal=false
+Categories=Network;WebBrowser;
+DESKEOF
+
+cat > /root/Desktop/firefox.desktop << 'DESKEOF'
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Firefox
+Comment=Firefox browser
+Exec=firefox-esr %U
+Icon=firefox-esr
+Terminal=false
+Categories=Network;WebBrowser;
+DESKEOF
+
+cat > /root/Desktop/colab.desktop << 'DESKEOF'
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Google Colab
+Comment=Open Google Colab
+Exec=chromium-browser https://colab.research.google.com/ --disable-dev-shm-usage --no-sandbox --disable-gpu --window-size=1024,768
+Icon=chromium-browser
+Terminal=false
+Categories=Network;WebBrowser;
+DESKEOF
+
+cat > /root/Desktop/firebase.desktop << 'DESKEOF'
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Firebase Console
+Comment=Open Firebase Console
+Exec=chromium-browser https://console.firebase.google.com/ --disable-dev-shm-usage --no-sandbox --disable-gpu --window-size=1024,768
+Icon=chromium-browser
+Terminal=false
+Categories=Network;WebBrowser;
+DESKEOF
+
+chmod +x /root/Desktop/*.desktop
+
+# Start Chromium with Colab by default (or remove this line to start empty)
+# chromium-browser https://colab.research.google.com/ --disable-dev-shm-usage --no-sandbox --disable-gpu --window-size=1024,768 &
 EOF
 
 RUN chmod +x /root/.vnc/xstartup
@@ -75,20 +161,49 @@ RUN wget -q https://github.com/novnc/noVNC/archive/refs/tags/v1.4.0.tar.gz -O /t
 # Copy noVNC HTML
 RUN cp /opt/novnc/vnc_lite.html /opt/novnc/index.html
 
-# Create Openbox menu
+# Create Openbox menu with browser options
 RUN mkdir -p /root/.config/openbox && \
     cat > /root/.config/openbox/menu.xml << 'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <openbox_menu xmlns="http://openbox.org/3.4/menu">
 <menu id="root-menu" label="Applications">
-  <item label="Dillo Browser">
-    <action name="Execute">
-      <command>dillo</command>
-    </action>
-  </item>
+  <menu id="browsers" label="Web Browsers">
+    <item label="Chromium (for Colab/Firebase)">
+      <action name="Execute">
+        <command>chromium-browser --disable-dev-shm-usage --no-sandbox --disable-gpu</command>
+      </action>
+    </item>
+    <item label="Firefox">
+      <action name="Execute">
+        <command>firefox-esr</command>
+      </action>
+    </item>
+  </menu>
+  <menu id="websites" label="Quick Links">
+    <item label="Google Colab">
+      <action name="Execute">
+        <command>chromium-browser https://colab.research.google.com/ --disable-dev-shm-usage --no-sandbox --disable-gpu</command>
+      </action>
+    </item>
+    <item label="Firebase Console">
+      <action name="Execute">
+        <command>chromium-browser https://console.firebase.google.com/ --disable-dev-shm-usage --no-sandbox --disable-gpu</command>
+      </action>
+    </item>
+    <item label="GitHub">
+      <action name="Execute">
+        <command>chromium-browser https://github.com/ --disable-dev-shm-usage --no-sandbox --disable-gpu</command>
+      </action>
+    </item>
+  </menu>
   <item label="File Manager">
     <action name="Execute">
       <command>pcmanfm</command>
+    </action>
+  </item>
+  <item label="System Monitor">
+    <action name="Execute">
+      <command>xfce4-terminal -e htop</command>
     </action>
   </item>
   <separator />
@@ -101,12 +216,27 @@ RUN mkdir -p /root/.config/openbox && \
 </openbox_menu>
 EOF
 
+# Create Chromium configuration for low memory
+RUN mkdir -p /etc/chromium-browser && \
+    echo 'CHROMIUM_FLAGS="--disable-dev-shm-usage --no-sandbox --disable-gpu --disable-software-rasterizer --max_old_space_size=512 --single-process"' > /etc/chromium-browser/default
+
+# Add swap file for heavy websites (helps with 512MB limit)
+RUN fallocate -l 512M /swapfile && \
+    chmod 600 /swapfile && \
+    mkswap /swapfile && \
+    swapon /swapfile
+
 EXPOSE 10000
 
-# Startup script - FIXED: removed -localhost no
+# Startup script with memory monitoring
 CMD echo "Starting VNC server..." && \
+    # Enable swap
+    swapon /swapfile && \
+    echo "Swap enabled: $(free -h | grep Swap)" && \
+    # Start VNC
     vncserver :1 -geometry ${VNC_RESOLUTION} -depth ${VNC_DEPTH} && \
     echo "VNC started on :1" && \
+    echo "Memory status: $(free -h)" && \
     echo "Starting noVNC..." && \
     /opt/novnc/utils/novnc_proxy --vnc localhost:5901 --listen 0.0.0.0:10000 --heartbeat 30 --web /opt/novnc && \
     tail -f /dev/null

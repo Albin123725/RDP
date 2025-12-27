@@ -19,9 +19,9 @@ RUN mkdir -p ~/.vnc && \
 
 EXPOSE 5900
 
-# Start everything
+# Start everything - DISABLE WebSocket support
 CMD echo "==========================================" && \
-    echo "  🖥️  UBUNTU VNC DESKTOP" && \
+    echo "  🖥️  UBUNTU VNC DESKTOP (DIRECT TCP)" && \
     echo "==========================================" && \
     echo "" && \
     echo "  📍 CONNECT WITH VNC CLIENT:" && \
@@ -30,13 +30,10 @@ CMD echo "==========================================" && \
     echo "  Port: 5900" && \
     echo "  Password: ${VNC_PASSWORD}" && \
     echo "" && \
-    echo "  🔗 Download VNC Viewer:" && \
-    echo "  https://www.realvnc.com/en/connect/download/viewer/" && \
-    echo "" && \
     echo "==========================================" && \
     echo "" && \
     echo "Starting desktop environment..." && \
-    # Start virtual display (1024x768, 16-bit color)
+    # Start virtual display
     Xvfb :1 -screen 0 1024x768x16 & \
     sleep 3 && \
     # Start window manager
@@ -45,6 +42,6 @@ CMD echo "==========================================" && \
     # Start Firefox
     firefox about:blank & \
     sleep 2 && \
-    # Start VNC server on port 5900
-    echo "VNC server listening on port 5900..." && \
-    x11vnc -display :1 -forever -shared -rfbauth ~/.vnc/passwd -rfbport 5900 -noxdamage
+    # Start VNC server on port 5900 - DISABLE WebSocket
+    echo "Starting VNC server (TCP only, no WebSocket)..." && \
+    x11vnc -display :1 -forever -shared -rfbauth ~/.vnc/passwd -rfbport 5900 -nosel -noshm -nowf -noscr

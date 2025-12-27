@@ -5,12 +5,10 @@ services:
     dockerfilePath: ./Dockerfile
     plan: free
     autoDeploy: true
-    # Remove health check or set to simple path
-    healthCheckPath: /
+    # NO health check until it works
+    # healthCheckPath: /
     envVars:
       - key: VNC_PASSWD
         value: "password123"
-      - key: RESOLUTION  # or VNC_RESOLUTION depending on Dockerfile
-        value: "800x600"
     resources:
       memoryMB: 512

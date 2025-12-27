@@ -5,7 +5,6 @@ services:
     dockerfilePath: ./Dockerfile
     plan: free
     autoDeploy: true
-    healthCheckPath: /vnc.html
     envVars:
       - key: VNC_PASSWORD
         value: "yourpassword123"

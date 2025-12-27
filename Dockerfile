@@ -2,53 +2,34 @@ FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV VNC_PASSWORD=password123
-ENV DISPLAY=:1
 
-# Install TigerVNC with HTTP server
 RUN apt update && apt install -y \
-    tigervnc-standalone-server \
-    tigervnc-common \
-    tigervnc-scraping-server \
+    x11vnc \
     xvfb \
     fluxbox \
     firefox \
+    wget \
+    python3 \
     --no-install-recommends && \
     apt clean
 
-# Setup VNC password
 RUN mkdir -p ~/.vnc && \
-    echo ${VNC_PASSWORD} | vncpasswd -f > ~/.vnc/passwd && \
-    chmod 600 ~/.vnc/passwd
+    x11vnc -storepasswd ${VNC_PASSWORD} ~/.vnc/passwd
 
-# Create xstartup
-RUN echo '#!/bin/bash' > ~/.vnc/xstartup && \
-    echo 'fluxbox &' >> ~/.vnc/xstartup && \
-    echo 'sleep 2' >> ~/.vnc/xstartup && \
-    echo 'firefox about:blank' >> ~/.vnc/xstartup && \
-    chmod +x ~/.vnc/xstartup
+# Download and run noVNC's simple server
+RUN wget -q https://github.com/novnc/websockify/archive/refs/tags/v0.11.0.tar.gz -O /tmp/websockify.tar.gz && \
+    tar -xzf /tmp/websockify.tar.gz -C /tmp/ && \
+    mv /tmp/websockify-0.11.0 /websockify && \
+    rm /tmp/websockify.tar.gz
 
-EXPOSE 80
+EXPOSE 8080
 
-# Use TigerVNC's built-in HTTP server
-CMD echo "==========================================" && \
-    echo "  🖥️  VNC DESKTOP (Free Tier)" && \
-    echo "==========================================" && \
-    echo "" && \
-    # Start virtual display
-    Xvfb :1 -screen 0 1024x768x24 & \
-    sleep 3 && \
-    # Start window manager
+# Simple one-command startup
+CMD Xvfb :1 -screen 0 1024x768x16 & \
+    sleep 2 && \
     fluxbox & \
-    sleep 2 && \
-    # Start Firefox
+    sleep 1 && \
     firefox about:blank & \
-    sleep 2 && \
-    # Start TigerVNC with HTTP interface on port 80
-    echo "Starting TigerVNC HTTP server on port 80..." && \
-    vncserver :1 -geometry 1024x768 -depth 24 -localhost no -rfbport 5900 -httpport 80 -alwaysshared && \
-    echo "==========================================" && \
-    echo "  Access at: https://$(hostname)" && \
-    echo "  Password: ${VNC_PASSWORD}" && \
-    echo "==========================================" && \
-    # Keep running
-    tail -f /dev/null
+    sleep 1 && \
+    x11vnc -display :1 -forever -shared -rfbauth ~/.vnc/passwd -localhost & \
+    cd /websockify && python3 -m websockify --web=/usr/share/novnc/ 8080 localhost:5900

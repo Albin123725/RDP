@@ -8,7 +8,7 @@ ENV VNC_PASSWD=password123
 ENV VNC_RESOLUTION=800x600
 ENV VNC_DEPTH=16
 
-# Install packages
+# Install packages with proper fonts
 RUN apt update && apt install -y \
     tightvncserver \
     xserver-xorg-core \
@@ -20,6 +20,15 @@ RUN apt update && apt install -y \
     libnss3 \
     libasound2 \
     libgtk-3-0 \
+    # Install X11 fonts
+    xfonts-base \
+    xfonts-100dpi \
+    xfonts-75dpi \
+    xfonts-cyrillic \
+    xfonts-scalable \
+    fonts-liberation \
+    fonts-noto \
+    fonts-noto-cjk \
     --no-install-recommends && \
     apt clean && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
@@ -43,15 +52,24 @@ EOF
 
 RUN chmod +x /root/.vnc/xstartup
 
-# Fix vncserver font path
-RUN sed -i 's/\$fontPath = ".*"/\$fontPath = ""/' /usr/bin/vncserver
+# Create font directories that vncserver expects
+RUN mkdir -p /usr/share/fonts/X11/misc && \
+    mkdir -p /usr/share/fonts/X11/75dpi && \
+    mkdir -p /usr/share/fonts/X11/100dpi && \
+    # Update font cache
+    fc-cache -fv
+
+# Alternative: Fix vncserver to not require specific font paths
+RUN sed -i "s|if (.*fontPath.*)|if (0)|" /usr/bin/vncserver && \
+    sed -i "s|\$fontPath = \".*\"|\$fontPath = \"\"|" /usr/bin/vncserver
 
 EXPOSE 6080
 
-# Startup script
+# Startup script with font debugging
 CMD echo "=== Starting VNC Desktop ===" && \
-    echo "USER: $USER" && \
-    echo "HOME: $HOME" && \
+    echo "Checking fonts..." && \
+    ls -la /usr/share/fonts/X11/ && \
+    echo "Starting VNC server..." && \
     vncserver :1 -geometry ${VNC_RESOLUTION} -depth ${VNC_DEPTH} && \
     echo "VNC server started on :1" && \
     echo "Starting noVNC..." && \

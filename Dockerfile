@@ -1,78 +1,51 @@
 FROM ubuntu:22.04
 
-# Set environment variables
 ENV DEBIAN_FRONTEND=noninteractive
-ENV USER=root
-ENV HOME=/root
-ENV VNC_PASSWD=password123
-ENV VNC_RESOLUTION=800x600
-ENV VNC_DEPTH=16
+ENV VNC_PASSWORD=password123
+ENV DISPLAY=:1
 
-# Install packages with proper fonts
+# Install minimal packages
 RUN apt update && apt install -y \
-    tightvncserver \
-    xserver-xorg-core \
-    xinit \
-    novnc \
-    websockify \
-    openbox \
+    x11vnc \
+    xvfb \
+    fluxbox \
     chromium-browser \
-    libnss3 \
-    libasound2 \
-    libgtk-3-0 \
-    # Install X11 fonts
-    xfonts-base \
-    xfonts-100dpi \
-    xfonts-75dpi \
-    xfonts-cyrillic \
-    xfonts-scalable \
-    fonts-liberation \
-    fonts-noto \
-    fonts-noto-cjk \
+    wget \
+    python3 \
+    net-tools \
     --no-install-recommends && \
-    apt clean && \
-    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+    apt clean
 
-# Setup VNC password
-RUN mkdir -p /root/.vnc && \
-    echo "${VNC_PASSWD}" | vncpasswd -f > /root/.vnc/passwd && \
-    chmod 600 /root/.vnc/passwd
+# Download noVNC 1.2.0 (very stable)
+RUN wget -q https://github.com/novnc/noVNC/archive/v1.2.0.tar.gz -O /tmp/novnc.tar.gz && \
+    tar -xzf /tmp/novnc.tar.gz -C /opt/ && \
+    mv /opt/noVNC-1.2.0 /opt/novnc && \
+    rm /tmp/novnc.tar.gz
 
-# Create xstartup
-RUN cat > /root/.vnc/xstartup << 'EOF'
-#!/bin/bash
-unset SESSION_MANAGER
-unset DBUS_SESSION_BUS_ADDRESS
-xsetroot -solid grey
-vncconfig -iconic &
-openbox &
-sleep 2
-chromium-browser --no-sandbox --disable-dev-shm-usage --window-size=800,600 about:blank
-EOF
+# Set VNC password
+RUN mkdir -p ~/.vnc && \
+    x11vnc -storepasswd ${VNC_PASSWORD} ~/.vnc/passwd
 
-RUN chmod +x /root/.vnc/xstartup
+# Create startup script
+RUN echo '#!/bin/bash' > /start.sh
+RUN echo 'echo "Starting Xvfb..."' >> /start.sh
+RUN echo 'Xvfb :1 -screen 0 1024x768x16 &' >> /start.sh
+RUN echo 'sleep 3' >> /start.sh
+RUN echo 'echo "Starting fluxbox..."' >> /start.sh
+RUN echo 'fluxbox &' >> /start.sh
+RUN echo 'sleep 2' >> /start.sh
+RUN echo 'echo "Starting x11vnc..."' >> /start.sh
+RUN echo 'x11vnc -display :1 -forever -shared -rfbauth ~/.vnc/passwd -bg' >> /start.sh
+RUN echo 'sleep 2' >> /start.sh
+RUN echo 'echo "Starting browser..."' >> /start.sh
+RUN echo 'chromium-browser --no-sandbox --disable-dev-shm-usage --window-size=1024,768 about:blank &' >> /start.sh
+RUN echo 'sleep 2' >> /start.sh
+RUN echo 'echo "Starting noVNC..."' >> /start.sh
+RUN echo 'cd /opt/novnc && python3 -m websockify --web=. 8080 localhost:5900' >> /start.sh
+RUN echo 'wait' >> /start.sh
 
-# Create font directories that vncserver expects
-RUN mkdir -p /usr/share/fonts/X11/misc && \
-    mkdir -p /usr/share/fonts/X11/75dpi && \
-    mkdir -p /usr/share/fonts/X11/100dpi && \
-    # Update font cache
-    fc-cache -fv
+RUN chmod +x /start.sh
 
-# Alternative: Fix vncserver to not require specific font paths
-RUN sed -i "s|if (.*fontPath.*)|if (0)|" /usr/bin/vncserver && \
-    sed -i "s|\$fontPath = \".*\"|\$fontPath = \"\"|" /usr/bin/vncserver
+EXPOSE 8080
 
-EXPOSE 6080
-
-# Startup script with font debugging
-CMD echo "=== Starting VNC Desktop ===" && \
-    echo "Checking fonts..." && \
-    ls -la /usr/share/fonts/X11/ && \
-    echo "Starting VNC server..." && \
-    vncserver :1 -geometry ${VNC_RESOLUTION} -depth ${VNC_DEPTH} && \
-    echo "VNC server started on :1" && \
-    echo "Starting noVNC..." && \
-    websockify --web /usr/share/novnc/ 6080 localhost:5901 && \
-    echo "=== Ready ===" && \
-    tail -f /dev/null
+CMD /start.sh

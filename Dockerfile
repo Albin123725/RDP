@@ -4,8 +4,9 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV VNC_PASSWORD=password123
 ENV DISPLAY=:1
 
-# Install packages
+# Install packages including wget
 RUN apt update && apt install -y \
+    wget \
     x11vnc \
     xvfb \
     fluxbox \

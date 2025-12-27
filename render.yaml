@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: vnc-colab
+    name: browser-vnc
     env: docker
     dockerfilePath: ./Dockerfile
     plan: free
@@ -8,10 +8,10 @@ services:
     healthCheckPath: /vnc_lite.html
     envVars:
       - key: VNC_RESOLUTION
-        value: "1024x768"
+        value: "800x600"  # Can go lower to 640x480 if needed
       - key: VNC_DEPTH
-        value: "24"
+        value: "16"       # 8-bit for even more savings
       - key: VNC_PASSWD
-        value: "yourpassword"
+        value: "yourpassword123"
     resources:
       memoryMB: 512

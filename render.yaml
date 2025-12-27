@@ -5,7 +5,8 @@ services:
     dockerfilePath: ./Dockerfile
     plan: free
     autoDeploy: true
-    healthCheckPath: /  # Changed from /vnc_lite.html
+    # Remove healthCheckPath if causing issues, or use just "/"
+    healthCheckPath: /
     envVars:
       - key: VNC_RESOLUTION
         value: "800x600"

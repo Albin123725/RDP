@@ -1,10 +1,11 @@
 services:
-  - type: worker  # MUST be worker, not web
+  - type: web  # Free tier supports this
     name: vnc-desktop
     env: docker
     dockerfilePath: ./Dockerfile
     plan: free
     autoDeploy: true
+    healthCheckPath: /
     envVars:
       - key: VNC_PASSWORD
         value: "password123"

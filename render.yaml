@@ -7,6 +7,6 @@ services:
     autoDeploy: true
     envVars:
       - key: VNC_PASSWORD
-        value: "password123"
+        value: "yourpassword123"
     resources:
       memoryMB: 512

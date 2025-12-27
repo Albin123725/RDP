@@ -5,12 +5,12 @@ services:
     dockerfilePath: ./Dockerfile
     plan: free
     autoDeploy: true
-    healthCheckPath: /vnc_lite.html
+    healthCheckPath: /  # Changed from /vnc_lite.html
     envVars:
       - key: VNC_RESOLUTION
-        value: "800x600"  # Can go lower to 640x480 if needed
+        value: "800x600"
       - key: VNC_DEPTH
-        value: "16"       # 8-bit for even more savings
+        value: "16"
       - key: VNC_PASSWD
         value: "yourpassword123"
     resources:

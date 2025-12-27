@@ -30,15 +30,15 @@ RUN mkdir -p /root/.vnc && \
     echo "${VNC_PASSWD}" | vncpasswd -f > /root/.vnc/passwd && \
     chmod 600 /root/.vnc/passwd
 
-# Create xstartup
-RUN echo '#!/bin/bash
-unset SESSION_MANAGER
-unset DBUS_SESSION_BUS_ADDRESS
-xsetroot -solid grey
-vncconfig -iconic &
-openbox &
-sleep 2
-chromium-browser --disable-dev-shm-usage --no-sandbox --disable-gpu --window-size=800,600 about:blank' > /root/.vnc/xstartup && \
+# Create xstartup file
+RUN echo '#!/bin/bash' > /root/.vnc/xstartup && \
+    echo 'unset SESSION_MANAGER' >> /root/.vnc/xstartup && \
+    echo 'unset DBUS_SESSION_BUS_ADDRESS' >> /root/.vnc/xstartup && \
+    echo 'xsetroot -solid grey' >> /root/.vnc/xstartup && \
+    echo 'vncconfig -iconic &' >> /root/.vnc/xstartup && \
+    echo 'openbox &' >> /root/.vnc/xstartup && \
+    echo 'sleep 2' >> /root/.vnc/xstartup && \
+    echo 'chromium-browser --disable-dev-shm-usage --no-sandbox --disable-gpu --window-size=800,600 about:blank' >> /root/.vnc/xstartup && \
     chmod +x /root/.vnc/xstartup
 
 # Fix vncserver font path
@@ -49,7 +49,6 @@ RUN wget -q https://github.com/novnc/noVNC/archive/refs/tags/v1.4.0.tar.gz -O /t
     tar -xzf /tmp/novnc.tar.gz -C /opt/ && \
     mv /opt/noVNC-1.4.0 /opt/novnc && \
     rm /tmp/novnc.tar.gz && \
-    # Install websockify
     wget -q https://github.com/novnc/websockify/archive/refs/tags/v0.11.0.tar.gz -O /tmp/websockify.tar.gz && \
     tar -xzf /tmp/websockify.tar.gz -C /opt/novnc/utils/ && \
     mv /opt/novnc/utils/websockify-0.11.0 /opt/novnc/utils/websockify && \

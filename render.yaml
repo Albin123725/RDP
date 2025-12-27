@@ -1,13 +1,12 @@
 services:
   - type: web
-    name: vnc-desktop
+    name: vnc-proxy
     env: docker
     dockerfilePath: ./Dockerfile
     plan: free
     autoDeploy: true
-    healthCheckPath: /
     envVars:
       - key: VNC_PASSWORD
-        value: "password123"
+        value: "yourpassword123"
     resources:
       memoryMB: 512

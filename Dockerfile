@@ -3,20 +3,33 @@ FROM ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive
 ENV VNC_PASSWORD=password123
 ENV DISPLAY=:1
+ENV RESOLUTION=1024x768x16
 
-# Install minimal packages
+# Install packages - avoid snap for chromium
 RUN apt update && apt install -y \
     x11vnc \
     xvfb \
     fluxbox \
-    chromium-browser \
     wget \
     python3 \
-    net-tools \
+    python3-pip \
+    # Install chromium-browser from deb package, not snap
+    chromium-browser \
+    chromium-chromedriver \
+    # X11 utilities
+    x11-utils \
+    xterm \
+    # Fonts
+    xfonts-base \
+    fonts-liberation \
     --no-install-recommends && \
-    apt clean
+    apt clean && \
+    rm -rf /var/lib/apt/lists/*
 
-# Download noVNC 1.2.0 (very stable)
+# Install websockify via pip
+RUN pip3 install websockify numpy
+
+# Download noVNC 1.2.0 (stable)
 RUN wget -q https://github.com/novnc/noVNC/archive/v1.2.0.tar.gz -O /tmp/novnc.tar.gz && \
     tar -xzf /tmp/novnc.tar.gz -C /opt/ && \
     mv /opt/noVNC-1.2.0 /opt/novnc && \
@@ -26,23 +39,46 @@ RUN wget -q https://github.com/novnc/noVNC/archive/v1.2.0.tar.gz -O /tmp/novnc.t
 RUN mkdir -p ~/.vnc && \
     x11vnc -storepasswd ${VNC_PASSWORD} ~/.vnc/passwd
 
+# Create fluxbox config to suppress warnings
+RUN mkdir -p ~/.fluxbox && \
+    echo 'session.screen0.workspaces: 1' > ~/.fluxbox/init && \
+    echo 'session.screen0.toolbar.visible: false' >> ~/.fluxbox/init && \
+    echo 'session.screen0.toolbar.alpha: 255' >> ~/.fluxbox/init
+
 # Create startup script
-RUN echo '#!/bin/bash' > /start.sh
-RUN echo 'echo "Starting Xvfb..."' >> /start.sh
-RUN echo 'Xvfb :1 -screen 0 1024x768x16 &' >> /start.sh
-RUN echo 'sleep 3' >> /start.sh
-RUN echo 'echo "Starting fluxbox..."' >> /start.sh
-RUN echo 'fluxbox &' >> /start.sh
-RUN echo 'sleep 2' >> /start.sh
-RUN echo 'echo "Starting x11vnc..."' >> /start.sh
-RUN echo 'x11vnc -display :1 -forever -shared -rfbauth ~/.vnc/passwd -bg' >> /start.sh
-RUN echo 'sleep 2' >> /start.sh
-RUN echo 'echo "Starting browser..."' >> /start.sh
-RUN echo 'chromium-browser --no-sandbox --disable-dev-shm-usage --window-size=1024,768 about:blank &' >> /start.sh
-RUN echo 'sleep 2' >> /start.sh
-RUN echo 'echo "Starting noVNC..."' >> /start.sh
-RUN echo 'cd /opt/novnc && python3 -m websockify --web=. 8080 localhost:5900' >> /start.sh
-RUN echo 'wait' >> /start.sh
+RUN cat > /start.sh << 'EOF'
+#!/bin/bash
+
+echo "=== Starting VNC Desktop ==="
+
+# Start Xvfb
+echo "Starting X virtual framebuffer..."
+Xvfb ${DISPLAY} -screen 0 ${RESOLUTION} &
+XVFB_PID=$!
+sleep 3
+
+# Start fluxbox
+echo "Starting window manager..."
+fluxbox &
+sleep 2
+
+# Start x11vnc
+echo "Starting VNC server..."
+x11vnc -display ${DISPLAY} -forever -shared -rfbauth ~/.vnc/passwd -bg
+
+# Start browser
+echo "Starting browser..."
+# Use --no-sandbox flag for Chrome in containers
+chromium-browser --no-sandbox --disable-dev-shm-usage --window-size=1024,768 about:blank &
+sleep 3
+
+# Start noVNC
+echo "Starting noVNC web interface..."
+cd /opt/novnc
+websockify --web=. 8080 localhost:5900
+
+wait $XVFB_PID
+EOF
 
 RUN chmod +x /start.sh
 

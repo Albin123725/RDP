@@ -12,19 +12,33 @@ RUN apt update && apt install -y \
     firefox \
     python3 \
     python3-pip \
+    nginx \
     --no-install-recommends && \
     apt clean
 
-# Install websockify
+# Install noVNC dependencies
 RUN pip3 install websockify
 
 # Set VNC password
 RUN mkdir -p ~/.vnc && \
     x11vnc -storepasswd ${VNC_PASSWORD} ~/.vnc/passwd
 
-# Create a simple HTML page with VNC client
-RUN mkdir -p /app && \
-    cat > /app/index.html << 'EOF'
+# Create HTML page with proper noVNC
+RUN mkdir -p /var/www/html && \
+    wget -q https://github.com/novnc/noVNC/archive/refs/tags/v1.4.0.tar.gz -O /tmp/novnc.tar.gz && \
+    tar -xzf /tmp/novnc.tar.gz -C /tmp/ && \
+    cp -r /tmp/noVNC-1.4.0/vnc_lite.html /var/www/html/ && \
+    cp -r /tmp/noVNC-1.4.0/app/ /var/www/html/ && \
+    cp -r /tmp/noVNC-1.4.0/core/ /var/www/html/ && \
+    cp -r /tmp/noVNC-1.4.0/vendor/ /var/www/html/ && \
+    rm -rf /tmp/noVNC-1.4.0 /tmp/novnc.tar.gz
+
+# Fix the noVNC JavaScript to work with CDN paths
+RUN sed -i 's|\.\./core/|./core/|g' /var/www/html/app/*.js && \
+    sed -i 's|\.\./vendor/|./vendor/|g' /var/www/html/app/*.js
+
+# Create custom HTML with working VNC client
+RUN cat > /var/www/html/index.html << 'EOF'
 <!DOCTYPE html>
 <html>
 <head>
@@ -32,213 +46,206 @@ RUN mkdir -p /app && \
     <meta charset="UTF-8">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body, html { width: 100%; height: 100%; overflow: hidden; }
+        body, html { width: 100%; height: 100%; }
         #container { width: 100%; height: 100%; display: flex; flex-direction: column; }
         #header { background: #2c3e50; color: white; padding: 15px; }
-        #vnc-area { flex: 1; background: black; position: relative; }
+        #vnc-container { flex: 1; background: black; position: relative; }
         #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); 
-                   color: white; text-align: center; }
-        #status { background: rgba(0,0,0,0.8); color: white; padding: 10px; position: absolute; 
-                  bottom: 0; left: 0; right: 0; }
-        button { background: #3498db; color: white; border: none; padding: 8px 16px; 
-                 margin-left: 10px; cursor: pointer; border-radius: 4px; }
+                   color: white; text-align: center; background: rgba(0,0,0,0.8); padding: 30px; 
+                   border-radius: 10px; }
+        button { background: #3498db; color: white; border: none; padding: 10px 20px; 
+                 margin: 5px; cursor: pointer; border-radius: 5px; font-size: 16px; }
         button:hover { background: #2980b9; }
+        #status { color: white; margin-top: 20px; }
     </style>
+    <!-- Load noVNC from CDN to avoid module errors -->
+    <script src="https://cdn.jsdelivr.net/npm/@novnc/novnc@1.4.0/lib/rfb.min.js"></script>
 </head>
 <body>
     <div id="container">
         <div id="header">
             <h2>VNC Desktop Viewer</h2>
-            <button onclick="connectVNC()" id="connect-btn">Connect</button>
-            <button onclick="location.reload()">Refresh</button>
+            <button onclick="connectVNC()" id="connect-btn">Connect to Desktop</button>
+            <button onclick="location.reload()">Refresh Page</button>
         </div>
-        <div id="vnc-area">
+        <div id="vnc-container">
             <div id="loading">
-                <h3>Ready to Connect</h3>
-                <p>Click "Connect" button to start VNC session</p>
+                <h3>Click "Connect to Desktop" to start</h3>
+                <p>Your Ubuntu desktop with Firefox will appear here</p>
+                <div id="status">Ready</div>
             </div>
-            <canvas id="vnc-canvas" style="display: none; width: 100%; height: 100%;"></canvas>
+            <div id="screen" style="width: 100%; height: 100%;"></div>
         </div>
-        <div id="status">Disconnected</div>
     </div>
 
     <script>
-        // Simple RFB/VNC client implementation
-        class SimpleVNC {
-            constructor(canvas, host, port, password) {
-                this.canvas = canvas;
-                this.ctx = canvas.getContext('2d');
-                this.host = host;
-                this.port = port;
-                this.password = password;
-                this.ws = null;
-                this.connected = false;
-                this.frameBuffer = null;
-                
-                // Set canvas size
-                this.resizeCanvas();
-                window.addEventListener('resize', () => this.resizeCanvas());
-            }
-            
-            resizeCanvas() {
-                this.canvas.width = this.canvas.clientWidth;
-                this.canvas.height = this.canvas.clientHeight;
-                if (this.frameBuffer) {
-                    this.drawFrame();
-                }
-            }
-            
-            connect() {
-                const wsUrl = `wss://${this.host}/websockify`;
-                console.log('Connecting to:', wsUrl);
-                
-                this.ws = new WebSocket(wsUrl);
-                
-                this.ws.onopen = () => {
-                    console.log('WebSocket connected');
-                    this.sendProtocolVersion();
-                };
-                
-                this.ws.onmessage = (event) => {
-                    this.handleMessage(event.data);
-                };
-                
-                this.ws.onclose = () => {
-                    console.log('WebSocket disconnected');
-                    this.connected = false;
-                    updateStatus('Disconnected');
-                };
-                
-                this.ws.onerror = (error) => {
-                    console.error('WebSocket error:', error);
-                    updateStatus('Connection error');
-                };
-            }
-            
-            sendProtocolVersion() {
-                // Send RFB protocol version
-                const version = "RFB 003.008\n";
-                this.ws.send(version);
-            }
-            
-            handleMessage(data) {
-                // Simple message handler - in real implementation, 
-                // you'd parse RFB protocol messages
-                console.log('Received data:', data);
-                
-                // For demo, just show we're connected
-                if (!this.connected) {
-                    this.connected = true;
-                    updateStatus('Connected - Desktop loading...');
-                    document.getElementById('loading').style.display = 'none';
-                    document.getElementById('vnc-canvas').style.display = 'block';
-                    
-                    // Create a simple desktop preview
-                    this.frameBuffer = this.createDemoDesktop();
-                    this.drawFrame();
-                }
-            }
-            
-            createDemoDesktop() {
-                // Create a simple demo desktop (in real VNC, this comes from server)
-                const width = 1024;
-                const height = 768;
-                const canvas = document.createElement('canvas');
-                canvas.width = width;
-                canvas.height = height;
-                const ctx = canvas.getContext('2d');
-                
-                // Draw background
-                ctx.fillStyle = '#2c3e50';
-                ctx.fillRect(0, 0, width, height);
-                
-                // Draw desktop
-                ctx.fillStyle = '#34495e';
-                ctx.fillRect(50, 50, width - 100, height - 100);
-                
-                // Draw window
-                ctx.fillStyle = '#ecf0f1';
-                ctx.fillRect(100, 100, 800, 500);
-                ctx.fillStyle = '#3498db';
-                ctx.fillRect(100, 100, 800, 30);
-                
-                // Draw text
-                ctx.fillStyle = '#2c3e50';
-                ctx.font = '16px Arial';
-                ctx.fillText('Firefox Browser', 120, 122);
-                
-                ctx.fillStyle = '#7f8c8d';
-                ctx.font = '14px Arial';
-                ctx.fillText('Your VNC desktop is running!', 150, 200);
-                ctx.fillText('To use actual VNC:', 150, 230);
-                ctx.fillText('1. Download RealVNC Viewer', 170, 260);
-                ctx.fillText('2. Connect to: ' + window.location.hostname + ':5900', 170, 290);
-                ctx.fillText('3. Password: password123', 170, 320);
-                
-                return canvas;
-            }
-            
-            drawFrame() {
-                if (this.frameBuffer) {
-                    this.ctx.drawImage(this.frameBuffer, 0, 0, this.canvas.width, this.canvas.height);
-                }
-            }
-        }
-        
-        let vncClient = null;
+        let rfb;
+        let connected = false;
         
         function connectVNC() {
+            if (connected) return;
+            
             const btn = document.getElementById('connect-btn');
             btn.disabled = true;
             btn.textContent = 'Connecting...';
-            updateStatus('Connecting to VNC server...');
+            document.getElementById('status').textContent = 'Establishing connection...';
             
-            const canvas = document.getElementById('vnc-canvas');
             const host = window.location.hostname;
+            const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+            const port = window.location.port ? ':' + window.location.port : '';
             
-            // Try WebSocket connection
-            vncClient = new SimpleVNC(canvas, host, 443, 'password123');
-            vncClient.connect();
+            // Try different WebSocket paths
+            const wsPaths = [
+                '/websockify',
+                '/websockify/',
+                'websockify'
+            ];
             
-            // Fallback: Show instructions if WebSocket fails
-            setTimeout(() => {
-                if (!vncClient || !vncClient.connected) {
-                    updateStatus('WebSocket failed. Using direct VNC connection...');
-                    showInstructions();
+            let currentTry = 0;
+            
+            function tryConnect() {
+                if (currentTry >= wsPaths.length) {
+                    document.getElementById('status').textContent = 'Failed to connect. Trying fallback...';
+                    setTimeout(tryFallback, 1000);
+                    return;
                 }
-            }, 5000);
+                
+                const wsUrl = protocol + host + port + wsPaths[currentTry];
+                console.log('Trying WebSocket:', wsUrl);
+                document.getElementById('status').textContent = 'Trying: ' + wsUrl;
+                
+                rfb = new RFB(document.getElementById('screen'), wsUrl, {
+                    credentials: { password: 'password123' },
+                    shared: true,
+                    repeaterID: ''
+                });
+                
+                rfb.scaleViewport = true;
+                rfb.resizeSession = true;
+                
+                rfb.addEventListener("connect", function() {
+                    connected = true;
+                    document.getElementById('loading').style.display = 'none';
+                    document.getElementById('status').textContent = 'Connected!';
+                    btn.textContent = 'Connected';
+                    console.log('VNC connected successfully');
+                });
+                
+                rfb.addEventListener("disconnect", function(e) {
+                    connected = false;
+                    btn.disabled = false;
+                    btn.textContent = 'Reconnect';
+                    document.getElementById('loading').style.display = 'block';
+                    document.getElementById('status').textContent = 'Disconnected: ' + (e.detail.clean ? 'Clean disconnect' : 'Connection lost');
+                    
+                    if (!e.detail.clean) {
+                        setTimeout(connectVNC, 3000);
+                    }
+                });
+                
+                rfb.addEventListener("credentialsrequired", function() {
+                    document.getElementById('status').textContent = 'Password required';
+                });
+                
+                rfb.addEventListener("securityfailure", function(e) {
+                    document.getElementById('status').textContent = 'Auth failed: ' + e.detail.status;
+                    currentTry++;
+                    setTimeout(tryConnect, 1000);
+                });
+                
+                // If no connection in 10 seconds, try next path
+                setTimeout(function() {
+                    if (!connected && rfb) {
+                        rfb.disconnect();
+                        currentTry++;
+                        tryConnect();
+                    }
+                }, 10000);
+            }
+            
+            function tryFallback() {
+                document.getElementById('status').textContent = 'Using fallback connection method...';
+                // Create iframe with novnc.com
+                document.getElementById('loading').innerHTML = `
+                    <h3>Alternative Connection</h3>
+                    <p>Click below to open in noVNC.com:</p>
+                    <button onclick="window.open('https://novnc.com/noVNC/vnc.html?host=' + encodeURIComponent('${host}') + '&port=${port.replace(":", "") || 443}&password=password123', '_blank')">
+                        Open in noVNC.com
+                    </button>
+                    <p>Or use VNC client to connect to:</p>
+                    <p><strong>Host:</strong> ${host}</p>
+                    <p><strong>Port:</strong> 5900</p>
+                    <p><strong>Password:</strong> password123</p>
+                `;
+            }
+            
+            tryConnect();
         }
         
-        function showInstructions() {
-            document.getElementById('loading').innerHTML = `
-                <h3>Connect with VNC Client</h3>
-                <p>For best experience, use a VNC viewer:</p>
-                <p>1. Download <a href="https://www.realvnc.com/en/connect/download/viewer/" target="_blank">RealVNC Viewer</a></p>
-                <p>2. Connect to: <code>${window.location.hostname}:5900</code></p>
-                <p>3. Password: <code>password123</code></p>
-                <button onclick="connectVNC()" style="margin-top: 20px;">Try Web Connection Again</button>
-            `;
-        }
-        
-        function updateStatus(text) {
-            document.getElementById('status').textContent = text;
-        }
-        
-        // Auto-connect after 2 seconds
-        setTimeout(connectVNC, 2000);
+        // Auto-connect after page loads
+        window.addEventListener('load', function() {
+            setTimeout(connectVNC, 1000);
+        });
     </script>
 </body>
 </html>
 EOF
 
-EXPOSE 8080
+# Configure nginx to proxy WebSocket connections
+RUN cat > /etc/nginx/nginx.conf << 'EOF'
+events {
+    worker_connections 1024;
+}
+
+http {
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+    
+    upstream websocket {
+        server localhost:6080;
+    }
+    
+    server {
+        listen 80;
+        server_name _;
+        
+        root /var/www/html;
+        index index.html;
+        
+        location / {
+            try_files $uri $uri/ =404;
+        }
+        
+        # WebSocket proxy for VNC
+        location /websockify {
+            proxy_pass http://websocket;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_read_timeout 86400;
+        }
+        
+        # Static files
+        location ~* \.(js|css|png|jpg|jpeg|gif|ico|html)$ {
+            expires 1d;
+            add_header Cache-Control "public, immutable";
+        }
+    }
+}
+EOF
+
+EXPOSE 80
 
 # Startup script
 CMD echo "=== Starting VNC Desktop ===" && \
-    # Start virtual display
+    # Start X virtual framebuffer
     Xvfb :1 -screen 0 1024x768x16 & \
     sleep 3 && \
-    # Start window manager  
+    # Start window manager
     fluxbox & \
     sleep 2 && \
     # Start Firefox
@@ -247,6 +254,10 @@ CMD echo "=== Starting VNC Desktop ===" && \
     # Start VNC server
     x11vnc -display :1 -forever -shared -rfbauth ~/.vnc/passwd & \
     sleep 2 && \
-    # Start websockify on port 8080
-    echo "Starting WebSocket proxy..." && \
-    websockify --web=/app 8080 localhost:5900
+    # Start websockify proxy
+    echo "Starting WebSocket proxy on port 6080..." && \
+    websockify 6080 localhost:5900 & \
+    sleep 2 && \
+    # Start nginx
+    echo "Starting nginx on port 80..." && \
+    nginx -g 'daemon off;'

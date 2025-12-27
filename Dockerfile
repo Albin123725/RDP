@@ -17,81 +17,83 @@ RUN apt update && apt install -y \
     --no-install-recommends && \
     apt clean
 
-# Install a DIFFERENT websocket library that works
-RUN pip3 install simple-websocket-server
+# Install websockets library
+RUN pip3 install websockets
 
 # Set VNC password
 RUN mkdir -p ~/.vnc && \
     x11vnc -storepasswd ${VNC_PASSWORD} ~/.vnc/passwd
 
-# Download and extract noVNC 1.2.0 (more stable)
-RUN wget -q https://github.com/novnc/noVNC/archive/refs/tags/v1.2.0.tar.gz -O /tmp/novnc.tar.gz && \
-    tar -xzf /tmp/novnc.tar.gz -C /opt/ && \
-    mv /opt/noVNC-1.2.0 /opt/novnc && \
-    rm /tmp/novnc.tar.gz
-
-# Create a Python WebSocket proxy that actually works
-RUN cat > /websocket_proxy.py << 'EOF'
+# Create a proper WebSocket to TCP proxy in Python
+RUN cat > /ws_proxy.py << 'EOF'
 #!/usr/bin/env python3
 import asyncio
 import websockets
 import socket
+import ssl
 import sys
-import signal
 
 VNC_HOST = 'localhost'
 VNC_PORT = 5900
 WS_PORT = 6080
 
-async def handle_client(websocket, path):
+async def handle_websocket(websocket, path):
     print(f"New WebSocket connection from {websocket.remote_address}")
     
     try:
         # Connect to VNC server
-        vnc_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        vnc_sock.connect((VNC_HOST, VNC_PORT))
-        vnc_sock.setblocking(False)
+        reader, writer = await asyncio.open_connection(VNC_HOST, VNC_PORT)
         
-        async def forward_to_vnc():
+        # Forward WebSocket to VNC
+        async def ws_to_vnc():
+            try:
+                async for message in websocket:
+                    writer.write(message)
+                    await writer.drain()
+            except:
+                pass
+            finally:
+                writer.close()
+        
+        # Forward VNC to WebSocket
+        async def vnc_to_ws():
             try:
                 while True:
-                    data = await websocket.recv()
-                    vnc_sock.send(data)
+                    data = await reader.read(4096)
+                    if not data:
+                        break
+                    await websocket.send(data)
             except:
                 pass
         
-        async def forward_from_vnc():
-            try:
-                while True:
-                    try:
-                        data = vnc_sock.recv(4096)
-                        if data:
-                            await websocket.send(data)
-                        else:
-                            break
-                    except BlockingIOError:
-                        await asyncio.sleep(0.01)
-            except:
-                pass
-        
-        await asyncio.gather(forward_to_vnc(), forward_from_vnc())
+        # Run both forwarding tasks
+        await asyncio.gather(ws_to_vnc(), vnc_to_ws())
         
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"Error handling connection: {e}")
     finally:
-        vnc_sock.close()
         print(f"Connection closed for {websocket.remote_address}")
 
 async def main():
     print(f"Starting WebSocket proxy on port {WS_PORT}")
-    async with websockets.serve(handle_client, "0.0.0.0", WS_PORT):
-        await asyncio.Future()  # run forever
+    print(f"Proxying to VNC at {VNC_HOST}:{VNC_PORT}")
+    
+    # Start WebSocket server
+    async with websockets.serve(
+        handle_websocket,
+        "0.0.0.0",
+        WS_PORT,
+        ping_interval=None,
+        max_size=2**24  # 16MB buffer
+    ):
+        print(f"WebSocket server ready on port {WS_PORT}")
+        await asyncio.Future()  # Run forever
 
 if __name__ == "__main__":
     asyncio.run(main())
 EOF
 
-# Create HTML with CDN noVNC (bypasses module errors)
+# Create HTML page
 RUN mkdir -p /var/www/html && \
     cat > /var/www/html/index.html << 'EOF'
 <!DOCTYPE html>
@@ -99,203 +101,139 @@ RUN mkdir -p /var/www/html && \
 <head>
     <title>VNC Desktop</title>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body, html { width: 100%; height: 100%; overflow: hidden; }
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; }
         #container { width: 100%; height: 100%; display: flex; flex-direction: column; }
-        #header { background: #2c3e50; color: white; padding: 15px; }
+        #header { background: #2c3e50; color: white; padding: 10px; }
         #vnc-area { flex: 1; background: black; position: relative; }
-        #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); 
-                   color: white; text-align: center; background: rgba(0,0,0,0.8); padding: 30px; 
-                   border-radius: 10px; z-index: 1000; }
         #screen { width: 100%; height: 100%; }
-        button { background: #3498db; color: white; border: none; padding: 10px 20px; 
-                 margin: 5px; cursor: pointer; border-radius: 5px; font-size: 16px; }
-        button:hover { background: #2980b9; }
-        #status { margin-top: 15px; color: white; }
+        #status { position: fixed; bottom: 10px; left: 10px; background: rgba(0,0,0,0.7); color: white; padding: 10px; }
+        #connect-btn { padding: 10px 20px; background: #4CAF50; color: white; border: none; cursor: pointer; margin-right: 10px; }
     </style>
-    <!-- Load noVNC from UNPKG (more reliable) -->
-    <script src="https://unpkg.com/@novnc/novnc@1.4.0/lib/rfb.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@novnc/novnc@1.4.0/lib/rfb.min.js"></script>
 </head>
 <body>
     <div id="container">
         <div id="header">
-            <h2>VNC Desktop</h2>
-            <button onclick="connectVNC()" id="connect-btn">Connect to Desktop</button>
-            <button onclick="location.reload()">Refresh</button>
+            <button id="connect-btn" onclick="connectVNC()">Connect VNC</button>
+            <span>VNC Desktop</span>
         </div>
         <div id="vnc-area">
-            <div id="loading">
-                <h3>Ready to Connect</h3>
-                <p>Click "Connect to Desktop" to start VNC session</p>
-                <div id="status">Status: Waiting...</div>
-            </div>
             <div id="screen"></div>
         </div>
+        <div id="status">Ready</div>
     </div>
 
     <script>
         let rfb = null;
-        let isConnected = false;
         
         function updateStatus(msg) {
-            document.getElementById('status').textContent = 'Status: ' + msg;
+            document.getElementById('status').textContent = msg;
             console.log(msg);
         }
         
         function connectVNC() {
-            if (isConnected) {
-                if (rfb) {
-                    rfb.disconnect();
-                }
-                return;
-            }
-            
             const btn = document.getElementById('connect-btn');
             btn.disabled = true;
             btn.textContent = 'Connecting...';
             updateStatus('Starting connection...');
             
             const host = window.location.hostname;
-            const isHttps = window.location.protocol === 'https:';
-            const port = window.location.port || (isHttps ? '443' : '80');
+            const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+            const port = window.location.port ? ':' + window.location.port : '';
             
-            // IMPORTANT: Use wss:// for HTTPS, ws:// for HTTP
-            const wsProtocol = isHttps ? 'wss://' : 'ws://';
+            // IMPORTANT: Use port 6080 for WebSocket (our Python proxy)
+            const wsUrl = protocol + host + ':6080';
             
-            // Try different WebSocket endpoints
-            const wsUrls = [
-                wsProtocol + host + ':' + port + '/websockify',
-                wsProtocol + host + '/websockify',
-                'ws://' + host + ':6080/websockify',
-                'wss://' + host + ':6080/websockify'
-            ];
+            console.log('Connecting to WebSocket:', wsUrl);
+            updateStatus('Connecting to: ' + wsUrl);
             
-            let currentUrlIndex = 0;
+            rfb = new RFB(document.getElementById('screen'), wsUrl, {
+                credentials: { password: 'password123' },
+                shared: true,
+                repeaterID: ''
+            });
             
-            function tryConnect(url) {
-                console.log('Trying WebSocket URL:', url);
-                updateStatus('Trying: ' + url);
+            rfb.scaleViewport = true;
+            
+            rfb.addEventListener("connect", function() {
+                updateStatus('Connected!');
+                btn.textContent = 'Disconnect';
+                btn.disabled = false;
+                btn.onclick = disconnectVNC;
+            });
+            
+            rfb.addEventListener("disconnect", function(e) {
+                updateStatus('Disconnected');
+                btn.textContent = 'Reconnect';
+                btn.disabled = false;
+                btn.onclick = connectVNC;
                 
-                if (rfb) {
-                    rfb.disconnect();
-                    rfb = null;
+                if (!e.detail.clean) {
+                    setTimeout(connectVNC, 3000);
                 }
-                
-                rfb = new RFB(document.getElementById('screen'), url, {
-                    credentials: { password: 'password123' },
-                    shared: true,
-                    repeaterID: ''
-                });
-                
-                rfb.scaleViewport = true;
-                rfb.resizeSession = true;
-                
-                rfb.addEventListener("connect", function() {
-                    isConnected = true;
-                    updateStatus('Connected successfully!');
-                    btn.textContent = 'Disconnect';
-                    btn.disabled = false;
-                    document.getElementById('loading').style.display = 'none';
-                    console.log('VNC connected to:', url);
-                });
-                
-                rfb.addEventListener("disconnect", function(e) {
-                    isConnected = false;
-                    updateStatus('Disconnected: ' + (e.detail.clean ? 'Normal' : 'Lost'));
-                    btn.textContent = 'Reconnect';
-                    btn.disabled = false;
-                    document.getElementById('loading').style.display = 'block';
-                    
-                    if (!e.detail.clean) {
-                        // Try to reconnect
-                        setTimeout(connectVNC, 3000);
-                    }
-                });
-                
-                rfb.addEventListener("securityfailure", function(e) {
-                    updateStatus('Security failed, trying next URL...');
-                    currentUrlIndex++;
-                    if (currentUrlIndex < wsUrls.length) {
-                        setTimeout(() => tryConnect(wsUrls[currentUrlIndex]), 1000);
-                    } else {
-                        updateStatus('All connection attempts failed');
-                        btn.textContent = 'Try Again';
-                        btn.disabled = false;
-                    }
-                });
-                
-                // Timeout after 5 seconds
-                setTimeout(function() {
-                    if (!isConnected && rfb) {
-                        updateStatus('Connection timeout, trying next...');
-                        currentUrlIndex++;
-                        if (currentUrlIndex < wsUrls.length) {
-                            setTimeout(() => tryConnect(wsUrls[currentUrlIndex]), 1000);
-                        }
-                    }
-                }, 5000);
+            });
+            
+            rfb.addEventListener("credentialsrequired", function() {
+                updateStatus('Password required...');
+            });
+            
+            rfb.addEventListener("securityfailure", function(e) {
+                updateStatus('Security failure: ' + e.detail.status);
+            });
+            
+            // Test WebSocket connection first
+            testWebSocket(wsUrl);
+        }
+        
+        function disconnectVNC() {
+            if (rfb) {
+                rfb.disconnect();
+                rfb = null;
             }
-            
-            // Start with first URL
-            tryConnect(wsUrls[0]);
-            
-            // Override disconnect button
-            btn.onclick = function() {
-                if (isConnected) {
-                    rfb.disconnect();
-                    btn.textContent = 'Connect to Desktop';
-                    isConnected = false;
-                } else {
-                    connectVNC();
-                }
+            const btn = document.getElementById('connect-btn');
+            btn.textContent = 'Connect VNC';
+            btn.onclick = connectVNC;
+            updateStatus('Disconnected by user');
+        }
+        
+        function testWebSocket(url) {
+            const ws = new WebSocket(url);
+            ws.onopen = function() {
+                console.log('WebSocket test: OPEN');
+                updateStatus('WebSocket connected, starting VNC...');
+                ws.close();
+            };
+            ws.onerror = function(e) {
+                console.error('WebSocket test: ERROR', e);
+                updateStatus('WebSocket error, trying alternative...');
+                // Try alternative URL
+                const altUrl = url.replace(':6080', '/websockify');
+                setTimeout(() => testWebSocket(altUrl), 1000);
             };
         }
         
-        // Auto-connect after 1 second
+        // Auto-connect
         setTimeout(connectVNC, 1000);
     </script>
 </body>
 </html>
 EOF
 
-# Configure nginx to proxy to our Python WebSocket server
+# Nginx config - SIMPLER
 RUN cat > /etc/nginx/nginx.conf << 'EOF'
 events {
     worker_connections 1024;
 }
 
 http {
-    include /etc/nginx/mime.types;
-    default_type application/octet-stream;
-    
     server {
         listen 80;
-        server_name _;
-        
         root /var/www/html;
         index index.html;
         
         location / {
             try_files $uri $uri/ =404;
-        }
-        
-        # Proxy WebSocket to Python server
-        location /websockify {
-            proxy_pass http://localhost:6080;
-            proxy_http_version 1.1;
-            proxy_set_header Upgrade $http_upgrade;
-            proxy_set_header Connection "upgrade";
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto $scheme;
-            
-            # Important timeouts
-            proxy_connect_timeout 7d;
-            proxy_send_timeout 7d;
-            proxy_read_timeout 7d;
         }
     }
 }
@@ -303,7 +241,7 @@ EOF
 
 EXPOSE 80
 
-# Startup script
+# Startup script - CRITICAL: Start x11vnc WITHOUT WebSocket support
 CMD echo "=== Starting VNC Desktop ===" && \
     # Clean up
     rm -f /tmp/.X1-lock /tmp/.X11-unix/X1 2>/dev/null || true && \
@@ -319,17 +257,18 @@ CMD echo "=== Starting VNC Desktop ===" && \
     echo "3. Starting Firefox..." && \
     firefox --no-remote about:blank & \
     sleep 2 && \
-    # Start x11vnc
-    echo "4. Starting VNC server..." && \
-    x11vnc -display :1 -forever -shared -rfbauth ~/.vnc/passwd -localhost -noxdamage & \
+    # Start x11vnc with NO WebSocket support
+    echo "4. Starting VNC server (TCP only)..." && \
+    x11vnc -display :1 -forever -shared -rfbauth ~/.vnc/passwd -localhost -nosel -noxdamage -nowf -noscr & \
     sleep 2 && \
     # Start Python WebSocket proxy
-    echo "5. Starting WebSocket proxy..." && \
-    python3 /websocket_proxy.py & \
+    echo "5. Starting Python WebSocket proxy on port 6080..." && \
+    python3 /ws_proxy.py & \
     sleep 2 && \
     # Start nginx
     echo "6. Starting nginx..." && \
     echo "=== Ready ===" && \
-    echo "Access: https://$(hostname)" && \
-    echo "Password: ${VNC_PASSWORD}" && \
+    echo "Web interface: https://$(hostname)" && \
+    echo "VNC Password: ${VNC_PASSWORD}" && \
+    echo "WebSocket URL: wss://$(hostname):6080" && \
     nginx -g 'daemon off;'

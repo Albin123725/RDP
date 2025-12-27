@@ -1,11 +1,10 @@
 services:
-  - type: web
+  - type: worker  # CRITICAL: Worker allows direct TCP port access
     name: vnc-desktop
     env: docker
     dockerfilePath: ./Dockerfile
     plan: free
     autoDeploy: true
-    healthCheckPath: /
     envVars:
       - key: VNC_PASSWORD
         value: "password123"

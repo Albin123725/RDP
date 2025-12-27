@@ -7,7 +7,7 @@ ENV USER=root
 ENV HOME=/root
 ENV DISPLAY=:1
 ENV VNC_PASSWD=password123
-ENV VNC_RESOLUTION=800x600  # Lower for browser
+ENV VNC_RESOLUTION=800x600
 ENV VNC_DEPTH=16
 
 # Set timezone
@@ -16,7 +16,6 @@ RUN ln -fs /usr/share/zoneinfo/Asia/Kolkata /etc/localtime && \
 
 # Install ONLY bare minimum + lightweight browser
 RUN apt update && apt install -y \
-    # Core X11/VNC
     xserver-xorg-core \
     xinit \
     tightvncserver \
@@ -27,39 +26,15 @@ RUN apt update && apt install -y \
     x11-utils \
     x11-xserver-utils \
     xfonts-base \
-    
-    # Minimal window manager (replaces full XFCE)
     openbox \
-    
-    # Lightweight browser - choose ONE:
-    # Option 1: Dillo (smallest - ~5MB)
     dillo \
-    
-    # OR Option 2: NetSurf (better CSS - ~15MB)
-    # netsurf-gtk \
-    
-    # OR Option 3: Lynx (text-only - smallest)
-    # lynx \
-    
-    # Basic file manager (optional)
     pcmanfm \
-    
-    # Remove terminal and unneeded packages
     --no-install-recommends && \
-    
-    # Clean up aggressively
     apt clean && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* && \
-    
-    # Remove ALL documentation, man pages, locales
     rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/locale/* && \
-    
-    # Remove XFCE completely (if any parts installed)
     apt purge -y '*xfce*' 'gnome*' 'kde*' || true && \
-    
-    # Remove terminal
     apt purge -y '*terminal*' 'xterm' 'gnome-terminal' 'xfce4-terminal' || true && \
-    
     apt autoremove -y && \
     apt autoclean
 
@@ -68,7 +43,7 @@ RUN mkdir -p /root/.vnc && \
     printf "${VNC_PASSWD}\n${VNC_PASSWD}\nn\n" | vncpasswd && \
     chmod 600 /root/.vnc/passwd
 
-# Create minimal xstartup with Openbox (lighter than XFCE)
+# Create minimal xstartup with Openbox
 RUN cat > /root/.vnc/xstartup << 'EOF'
 #!/bin/bash
 unset SESSION_MANAGER
@@ -77,15 +52,7 @@ unset DBUS_SESSION_BUS_ADDRESS
 [ -r $HOME/.Xresources ] && xrdb $HOME/.Xresources
 xsetroot -solid grey
 vncconfig -iconic &
-
-# Start Openbox (much lighter than XFCE)
 openbox-session &
-
-# Start Dillo browser automatically (optional)
-# sleep 2 && dillo &
-
-# Start minimal panel (optional - comment out to save more memory)
-# tint2 &
 EOF
 
 RUN chmod +x /root/.vnc/xstartup
@@ -103,7 +70,7 @@ RUN wget -q https://github.com/novnc/noVNC/archive/refs/tags/v1.4.0.tar.gz -O /t
 # Copy noVNC HTML
 RUN cp /opt/novnc/vnc_lite.html /opt/novnc/index.html
 
-# Create Openbox menu without terminal entries
+# Create Openbox menu
 RUN mkdir -p /root/.config/openbox && \
     cat > /root/.config/openbox/menu.xml << 'EOF'
 <?xml version="1.0" encoding="UTF-8"?>

@@ -1,18 +1,16 @@
 services:
   - type: web
-    name: browser-vnc
+    name: vnc-desktop
     env: docker
     dockerfilePath: ./Dockerfile
     plan: free
     autoDeploy: true
-    # Remove healthCheckPath if causing issues, or use just "/"
-    healthCheckPath: /
     envVars:
+      - key: VNC_PASSWD
+        value: "password123"
       - key: VNC_RESOLUTION
         value: "800x600"
-      - key: VNC_DEPTH
+      - key: VNC_DEPTH  
         value: "16"
-      - key: VNC_PASSWD
-        value: "yourpassword123"
     resources:
       memoryMB: 512

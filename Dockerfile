@@ -7,45 +7,68 @@ ENV USER=root
 ENV HOME=/root
 ENV DISPLAY=:1
 ENV VNC_PASSWD=password123
-ENV VNC_RESOLUTION=1024x576
-# Reduced from 24 to save memory
+ENV VNC_RESOLUTION=800x600  # Lower for browser
 ENV VNC_DEPTH=16
 
 # Set timezone
 RUN ln -fs /usr/share/zoneinfo/Asia/Kolkata /etc/localtime && \
     echo "Asia/Kolkata" > /etc/timezone
 
-# Install minimal required packages and clean up aggressively
+# Install ONLY bare minimum + lightweight browser
 RUN apt update && apt install -y \
-    xfce4 \
-    xfce4-goodies \
+    # Core X11/VNC
+    xserver-xorg-core \
+    xinit \
     tightvncserver \
     novnc \
     websockify \
     wget \
-    sudo \
     dbus-x11 \
     x11-utils \
     x11-xserver-utils \
     xfonts-base \
-    xfonts-100dpi \
-    xfonts-75dpi \
+    
+    # Minimal window manager (replaces full XFCE)
+    openbox \
+    
+    # Lightweight browser - choose ONE:
+    # Option 1: Dillo (smallest - ~5MB)
+    dillo \
+    
+    # OR Option 2: NetSurf (better CSS - ~15MB)
+    # netsurf-gtk \
+    
+    # OR Option 3: Lynx (text-only - smallest)
+    # lynx \
+    
+    # Basic file manager (optional)
+    pcmanfm \
+    
+    # Remove terminal and unneeded packages
     --no-install-recommends && \
+    
+    # Clean up aggressively
     apt clean && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* && \
-    # Remove unnecessary documentation and locales
+    
+    # Remove ALL documentation, man pages, locales
     rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/locale/* && \
-    # Remove Xfce components that aren't essential
-    apt purge -y xfce4-screensaver xfce4-power-manager xscreensaver* && \
+    
+    # Remove XFCE completely (if any parts installed)
+    apt purge -y '*xfce*' 'gnome*' 'kde*' || true && \
+    
+    # Remove terminal
+    apt purge -y '*terminal*' 'xterm' 'gnome-terminal' 'xfce4-terminal' || true && \
+    
     apt autoremove -y && \
     apt autoclean
 
-# Setup VNC password with less memory-intensive settings
+# Setup VNC password
 RUN mkdir -p /root/.vnc && \
     printf "${VNC_PASSWD}\n${VNC_PASSWD}\nn\n" | vncpasswd && \
     chmod 600 /root/.vnc/passwd
 
-# Create optimized xstartup with memory-saving options
+# Create minimal xstartup with Openbox (lighter than XFCE)
 RUN cat > /root/.vnc/xstartup << 'EOF'
 #!/bin/bash
 unset SESSION_MANAGER
@@ -54,12 +77,15 @@ unset DBUS_SESSION_BUS_ADDRESS
 [ -r $HOME/.Xresources ] && xrdb $HOME/.Xresources
 xsetroot -solid grey
 vncconfig -iconic &
-# Disable composite manager to save memory
-xfwm4 --compositor=off &
-# Start with minimal Xfce components
-xfsettingsd --daemon
-xfce4-panel &
-xfdesktop &
+
+# Start Openbox (much lighter than XFCE)
+openbox-session &
+
+# Start Dillo browser automatically (optional)
+# sleep 2 && dillo &
+
+# Start minimal panel (optional - comment out to save more memory)
+# tint2 &
 EOF
 
 RUN chmod +x /root/.vnc/xstartup
@@ -74,37 +100,41 @@ RUN wget -q https://github.com/novnc/noVNC/archive/refs/tags/v1.4.0.tar.gz -O /t
     mv /opt/novnc/utils/websockify-0.11.0 /opt/novnc/utils/websockify && \
     rm /tmp/websockify.tar.gz
 
-# Create cleanup script for periodic memory management
-RUN cat > /cleanup.sh << 'EOF'
-#!/bin/bash
-while true; do
-    # Clean up temporary files
-    find /tmp -type f -atime +1 -delete 2>/dev/null || true
-    find /var/tmp -type f -atime +1 -delete 2>/dev/null || true
-    # Kill any zombie processes
-    ps aux | grep "defunct" | grep -v grep | awk "{print \$2}" | xargs -r kill -9 2>/dev/null || true
-    sleep 300
-done
-EOF
-
-RUN chmod +x /cleanup.sh
-
-# Copy noVNC HTML files to serve as health check endpoint
+# Copy noVNC HTML
 RUN cp /opt/novnc/vnc_lite.html /opt/novnc/index.html
 
-# Fix the vncserver configuration more carefully
-RUN sed -i '/^\s*\$fontPath\s*=/{s/.*/\$fontPath = "";/}' /usr/bin/vncserver
+# Create Openbox menu without terminal entries
+RUN mkdir -p /root/.config/openbox && \
+    cat > /root/.config/openbox/menu.xml << 'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<openbox_menu xmlns="http://openbox.org/3.4/menu">
+<menu id="root-menu" label="Applications">
+  <item label="Dillo Browser">
+    <action name="Execute">
+      <command>dillo</command>
+    </action>
+  </item>
+  <item label="File Manager">
+    <action name="Execute">
+      <command>pcmanfm</command>
+    </action>
+  </item>
+  <separator />
+  <item label="Exit">
+    <action name="Exit">
+      <prompt>yes</prompt>
+    </action>
+  </item>
+</menu>
+</openbox_menu>
+EOF
 
 EXPOSE 10000
 
-# Simple startup script that works
+# Startup script
 CMD echo "Starting VNC server..." && \
-    /cleanup.sh & \
-    # Start VNC server without the problematic -fp option
-    vncserver :1 -geometry ${VNC_RESOLUTION} -depth ${VNC_DEPTH} && \
-    echo "VNC started successfully on display :1" && \
-    echo "Starting noVNC proxy..." && \
-    # Start noVNC proxy
+    vncserver :1 -geometry ${VNC_RESOLUTION} -depth ${VNC_DEPTH} -localhost no && \
+    echo "VNC started on :1" && \
+    echo "Starting noVNC..." && \
     /opt/novnc/utils/novnc_proxy --vnc localhost:5901 --listen 0.0.0.0:10000 --heartbeat 30 --web /opt/novnc && \
-    echo "noVNC started on port 10000" && \
     tail -f /dev/null

@@ -6,11 +6,7 @@ services:
     plan: free
     autoDeploy: true
     envVars:
-      - key: VNC_PASSWD
+      - key: VNC_PASSWORD
         value: "password123"
-      - key: VNC_RESOLUTION
-        value: "800x600"
-      - key: VNC_DEPTH  
-        value: "16"
     resources:
       memoryMB: 512

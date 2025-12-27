@@ -57,6 +57,11 @@ EOF
 
 RUN chmod +x /root/.vnc/xstartup
 
+# Fix vncserver font path issue
+RUN sed -i 's/\$fontPath = ".*"/\$fontPath = ""/' /usr/bin/vncserver && \
+    mkdir -p /usr/share/fonts/X11/misc && \
+    touch /root/.Xauthority
+
 # Get noVNC
 RUN wget -q https://github.com/novnc/noVNC/archive/refs/tags/v1.4.0.tar.gz -O /tmp/novnc.tar.gz && \
     tar -xzf /tmp/novnc.tar.gz -C /opt/ && \
@@ -98,9 +103,9 @@ EOF
 
 EXPOSE 10000
 
-# Startup script
+# Startup script - FIXED: removed -localhost no
 CMD echo "Starting VNC server..." && \
-    vncserver :1 -geometry ${VNC_RESOLUTION} -depth ${VNC_DEPTH} -localhost no && \
+    vncserver :1 -geometry ${VNC_RESOLUTION} -depth ${VNC_DEPTH} && \
     echo "VNC started on :1" && \
     echo "Starting noVNC..." && \
     /opt/novnc/utils/novnc_proxy --vnc localhost:5901 --listen 0.0.0.0:10000 --heartbeat 30 --web /opt/novnc && \

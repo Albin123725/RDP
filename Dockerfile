@@ -2,27 +2,18 @@ FROM ubuntu:22.04
 
 # Set environment variables
 ENV DEBIAN_FRONTEND=noninteractive
-ENV TZ=Asia/Kolkata
-ENV USER=root
-ENV HOME=/root
-ENV DISPLAY=:1
 ENV VNC_PASSWD=password123
 ENV VNC_RESOLUTION=800x600
 ENV VNC_DEPTH=16
-
-# Set timezone
-RUN ln -fs /usr/share/zoneinfo/Asia/Kolkata /etc/localtime && \
-    echo "Asia/Kolkata" > /etc/timezone
 
 # Install packages
 RUN apt update && apt install -y \
     tightvncserver \
     xserver-xorg-core \
     xinit \
-    # Install novnc and websockify from apt
-    novnc \
-    websockify \
     wget \
+    python3 \
+    python3-numpy \
     dbus-x11 \
     xfonts-base \
     openbox \
@@ -32,56 +23,48 @@ RUN apt update && apt install -y \
     libgtk-3-0 \
     --no-install-recommends && \
     apt clean && \
-    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /usr/share/doc/* /usr/share/man/* /usr/share/locale/*
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-# Setup VNC password
+# Setup VNC
 RUN mkdir -p /root/.vnc && \
     echo "${VNC_PASSWD}" | vncpasswd -f > /root/.vnc/passwd && \
     chmod 600 /root/.vnc/passwd
 
 # Create xstartup
-RUN cat > /root/.vnc/xstartup << 'EOF'
-#!/bin/bash
+RUN echo '#!/bin/bash
 unset SESSION_MANAGER
 unset DBUS_SESSION_BUS_ADDRESS
 xsetroot -solid grey
 vncconfig -iconic &
 openbox &
-sleep 1
-chromium-browser \
-  --disable-dev-shm-usage \
-  --no-sandbox \
-  --disable-gpu \
-  --max_old_space_size=256 \
-  --window-size=800,600 \
-  about:blank
-EOF
-
-RUN chmod +x /root/.vnc/xstartup
+sleep 2
+chromium-browser --disable-dev-shm-usage --no-sandbox --disable-gpu --window-size=800,600 about:blank' > /root/.vnc/xstartup && \
+    chmod +x /root/.vnc/xstartup
 
 # Fix vncserver font path
-RUN sed -i 's/\$fontPath = ".*"/\$fontPath = ""/' /usr/bin/vncserver && \
-    touch /root/.Xauthority
+RUN sed -i 's/\$fontPath = ".*"/\$fontPath = ""/' /usr/bin/vncserver
 
-# Create symbolic links for novnc (apt installs in different locations)
-RUN ln -sf /usr/share/novnc/vnc_lite.html /usr/share/novnc/index.html && \
-    ln -sf /usr/share/novnc/vnc.html /usr/share/novnc/vnc_lite.html
+# Install noVNC manually
+RUN wget -q https://github.com/novnc/noVNC/archive/refs/tags/v1.4.0.tar.gz -O /tmp/novnc.tar.gz && \
+    tar -xzf /tmp/novnc.tar.gz -C /opt/ && \
+    mv /opt/noVNC-1.4.0 /opt/novnc && \
+    rm /tmp/novnc.tar.gz && \
+    # Install websockify
+    wget -q https://github.com/novnc/websockify/archive/refs/tags/v0.11.0.tar.gz -O /tmp/websockify.tar.gz && \
+    tar -xzf /tmp/websockify.tar.gz -C /opt/novnc/utils/ && \
+    mv /opt/novnc/utils/websockify-0.11.0 /opt/novnc/utils/websockify && \
+    rm /tmp/websockify.tar.gz
 
-# Browser optimization
-RUN mkdir -p /etc/chromium-browser && \
-    echo 'CHROMIUM_FLAGS="--disable-dev-shm-usage --no-sandbox --disable-gpu --max_old_space_size=256"' > /etc/chromium-browser/default
+# Create index.html for health check
+RUN cp /opt/novnc/vnc_lite.html /opt/novnc/index.html
 
-EXPOSE 6080  # novnc default port
+EXPOSE 8080
 
-# Startup script using apt-installed novnc
-CMD echo "=== Starting Browser VNC ===" && \
-    echo "Starting VNC server..." && \
+# Startup script
+CMD echo "=== Starting VNC Desktop ===" && \
     vncserver :1 -geometry ${VNC_RESOLUTION} -depth ${VNC_DEPTH} && \
-    echo "VNC started on display :1" && \
-    echo "Starting noVNC on port 6080..." && \
-    # Start websockify proxy (novnc from apt)
-    websockify --web /usr/share/novnc/ 6080 localhost:5901 && \
+    echo "VNC server started on :1" && \
+    echo "Starting noVNC on port 8080..." && \
+    /opt/novnc/utils/novnc_proxy --vnc localhost:5901 --listen 0.0.0.0:8080 --web /opt/novnc && \
     echo "=== Ready ===" && \
-    echo "Access: https://$(hostname).onrender.com" && \
-    echo "Password: ${VNC_PASSWD}" && \
     tail -f /dev/null

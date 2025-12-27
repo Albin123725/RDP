@@ -4,37 +4,38 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV VNC_PASSWORD=password123
 ENV DISPLAY=:1
 
-# Install minimal packages
+# Install TigerVNC with HTTP server
 RUN apt update && apt install -y \
-    x11vnc \
+    tigervnc-standalone-server \
+    tigervnc-common \
+    tigervnc-scraping-server \
     xvfb \
     fluxbox \
     firefox \
     --no-install-recommends && \
     apt clean
 
-# Set VNC password
+# Setup VNC password
 RUN mkdir -p ~/.vnc && \
-    x11vnc -storepasswd ${VNC_PASSWORD} ~/.vnc/passwd
+    echo ${VNC_PASSWORD} | vncpasswd -f > ~/.vnc/passwd && \
+    chmod 600 ~/.vnc/passwd
 
-EXPOSE 5900
+# Create xstartup
+RUN echo '#!/bin/bash' > ~/.vnc/xstartup && \
+    echo 'fluxbox &' >> ~/.vnc/xstartup && \
+    echo 'sleep 2' >> ~/.vnc/xstartup && \
+    echo 'firefox about:blank' >> ~/.vnc/xstartup && \
+    chmod +x ~/.vnc/xstartup
 
-# Start everything - DISABLE WebSocket support
+EXPOSE 80
+
+# Use TigerVNC's built-in HTTP server
 CMD echo "==========================================" && \
-    echo "  🖥️  UBUNTU VNC DESKTOP (DIRECT TCP)" && \
+    echo "  🖥️  VNC DESKTOP (Free Tier)" && \
     echo "==========================================" && \
     echo "" && \
-    echo "  📍 CONNECT WITH VNC CLIENT:" && \
-    echo "" && \
-    echo "  Host: rdp-quyu.onrender.com" && \
-    echo "  Port: 5900" && \
-    echo "  Password: ${VNC_PASSWORD}" && \
-    echo "" && \
-    echo "==========================================" && \
-    echo "" && \
-    echo "Starting desktop environment..." && \
     # Start virtual display
-    Xvfb :1 -screen 0 1024x768x16 & \
+    Xvfb :1 -screen 0 1024x768x24 & \
     sleep 3 && \
     # Start window manager
     fluxbox & \
@@ -42,6 +43,12 @@ CMD echo "==========================================" && \
     # Start Firefox
     firefox about:blank & \
     sleep 2 && \
-    # Start VNC server on port 5900 - DISABLE WebSocket
-    echo "Starting VNC server (TCP only, no WebSocket)..." && \
-    x11vnc -display :1 -forever -shared -rfbauth ~/.vnc/passwd -rfbport 5900 -nosel -noshm -nowf -noscr
+    # Start TigerVNC with HTTP interface on port 80
+    echo "Starting TigerVNC HTTP server on port 80..." && \
+    vncserver :1 -geometry 1024x768 -depth 24 -localhost no -rfbport 5900 -httpport 80 -alwaysshared && \
+    echo "==========================================" && \
+    echo "  Access at: https://$(hostname)" && \
+    echo "  Password: ${VNC_PASSWORD}" && \
+    echo "==========================================" && \
+    # Keep running
+    tail -f /dev/null

@@ -8,8 +8,19 @@ services:
     healthCheckPath: /vnc_lite.html
     envVars:
       - key: VNC_RESOLUTION
-        value: "1024x576"
+        value: "800x600"  # Lower resolution to save memory for browser
       - key: VNC_DEPTH
         value: "16"
+      - key: VNC_PASSWD
+        value: "password123"  # Set your password here
+      - key: TZ
+        value: "Asia/Kolkata"
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 1  # Optional: add small disk if you need persistence
+    domains:
+      - vnc-desktop.onrender.com  # Custom domain - choose your own name
     resources:
       memoryMB: 512
+      cpu: 0.1  # Free tier limit

@@ -1,5 +1,5 @@
 services:
-  - type: worker  # CRITICAL: Worker allows direct TCP port access
+  - type: worker  # MUST be worker, not web
     name: vnc-desktop
     env: docker
     dockerfilePath: ./Dockerfile

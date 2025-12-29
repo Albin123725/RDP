@@ -1,13 +1,20 @@
+# render.yaml
 services:
   - type: web
-    name: vnc-desktop
+    name: novnc-rdp
     env: docker
     dockerfilePath: ./Dockerfile
     plan: free
     autoDeploy: true
-    healthCheckPath: /
     envVars:
+      - key: RESOLUTION
+        value: 1280x720x24
+      - key: DISPLAY
+        value: :99
       - key: VNC_PASSWORD
-        value: "password123"
-    resources:
-      memoryMB: 512
+        value: password123
+      - key: NOVNC_PASSWORD
+        value: password123
+      - key: DEBIAN_FRONTEND
+        value: noninteractive
+    healthCheckPath: /health

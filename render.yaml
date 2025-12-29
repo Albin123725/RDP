@@ -1,4 +1,4 @@
-# render.yaml
+# render.yaml - SIMPLE WORKING VERSION
 services:
   - type: web
     name: novnc-rdp
@@ -6,21 +6,7 @@ services:
     dockerfilePath: ./Dockerfile
     plan: free
     autoDeploy: true
-    # Remove the commented port line and add proper port configuration
     envVars:
-      - key: RESOLUTION
-        value: 1280x720x24
-      - key: DISPLAY
-        value: :99
       - key: VNC_PASSWORD
-        value: password123
-      - key: NOVNC_PASSWORD
-        value: password123
-      - key: DEBIAN_FRONTEND
-        value: noninteractive
-      - key: PUID
-        value: "1000"
-      - key: PGID
-        value: "1000"
-    # Health check path (Render will auto-add port 10000)
-    healthCheckPath: /health
+        value: "password123"
+    healthCheckPath: /

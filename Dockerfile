@@ -1,159 +1,137 @@
+# Dockerfile
 FROM ubuntu:22.04
 
+# Prevent interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive
-ENV VNC_PASSWORD=password123
+ENV TZ=UTC
+ENV HOME=/root
+ENV DISPLAY=:99
+ENV RESOLUTION=1280x720x24
 
-# Install all necessary packages
-RUN apt update && apt install -y \
-    x11vnc \
-    xvfb \
-    fluxbox \
+# Install core system components
+RUN apt-get update && apt-get upgrade -y && \
+    apt-get install -y \
+    # Core GUI and RDP
+    xvfb x11vnc xdotool \
+    # Window manager (minimal)
+    openbox \
+    # Terminal
+    xterm \
+    # Browser
     firefox \
-    python3 \
-    python3-pip \
-    nginx \
-    net-tools \
-    curl \
-    --no-install-recommends && \
-    apt clean
+    # File manager
+    pcmanfm \
+    # Utilities
+    wget curl git unzip software-properties-common \
+    # Fonts
+    fonts-liberation fonts-noto fonts-ubuntu \
+    # Audio (optional for some sites)
+    pulseaudio pavucontrol \
+    # Video codecs
+    libavcodec-extra libx264-160 gstreamer1.0-libav \
+    # WebRTC support
+    libgstreamer-plugins-base1.0-0 libgstreamer1.0-0 \
+    # Chromium codecs for Firefox
+    libavcodec58 libavformat58 libavutil56 libswscale5 \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Install a DIFFERENT WebSocket library that handles HEAD requests
-RUN pip3 install simple-websocket-server
+# Install noVNC
+RUN git clone --depth 1 https://github.com/novnc/noVNC.git /opt/noVNC && \
+    git clone --depth 1 https://github.com/novnc/websockify /opt/noVNC/utils/websockify && \
+    ln -s /opt/noVNC/vnc.html /opt/noVNC/index.html
 
-# Set VNC password
-RUN mkdir -p ~/.vnc && \
-    x11vnc -storepasswd ${VNC_PASSWORD} ~/.vnc/passwd
+# Create startup script
+RUN echo '#!/bin/bash\n\
+\n\
+# Set up display\n\
+Xvfb $DISPLAY -screen 0 ${RESOLUTION} -ac +extension GLX +render -noreset & \n\
+\n\
+# Start VNC server\n\
+x11vnc -display $DISPLAY -noxdamage -forever -shared -rfbport 5900 -passwd ${VNC_PASSWORD:-password123} & \n\
+\n\
+# Start noVNC\n\
+/opt/noVNC/utils/novnc_proxy --vnc localhost:5900 --listen 8080 --web /opt/noVNC & \n\
+\n\
+# Wait for Xvfb\n\
+sleep 2\n\
+\n\
+# Set up Openbox\n\
+openbox --config-file /etc/xdg/openbox/rc.xml & \n\
+\n\
+# Set Firefox preferences for better performance\n\
+mkdir -p ~/.mozilla/firefox/default.default/\n\
+echo '\''{\n\
+  "browser.cache.disk.enable": true,\n\
+  "browser.cache.memory.enable": true,\n\
+  "browser.sessionstore.interval": 15000,\n\
+  "browser.startup.homepage": "about:blank",\n\
+  "dom.ipc.processCount": 8,\n\
+  "media.autoplay.default": 0,\n\
+  "media.ffmpeg.vaapi.enabled": true,\n\
+  "media.hardware-video-decoding.enabled": true,\n\
+  "media.navigator.enabled": true,\n\
+  "media.webrtc.hw.h264.enabled": true,\n\
+  "network.http.use-cache": true,\n\
+  "privacy.trackingprotection.enabled": false,\n\
+  "webgl.disabled": false\n\
+}'\'' > ~/.mozilla/firefox/default.default/prefs.js\n\
+\n\
+# Create desktop shortcuts\n\
+mkdir -p ~/Desktop\n\
+echo "[Desktop Entry]\n\
+Version=1.0\n\
+Type=Application\n\
+Name=Firefox\n\
+Comment=Web Browser\n\
+Exec=firefox\n\
+Icon=firefox\n\
+Terminal=false\n\
+Categories=Network;WebBrowser;" > ~/Desktop/firefox.desktop\n\
+\n\
+echo "[Desktop Entry]\n\
+Version=1.0\n\
+Type=Application\n\
+Name=Terminal\n\
+Comment=Terminal Emulator\n\
+Exec=xterm\n\
+Icon=utilities-terminal\n\
+Terminal=false\n\
+Categories=System;TerminalEmulator;" > ~/Desktop/terminal.desktop\n\
+\n\
+echo "[Desktop Entry]\n\
+Version=1.0\n\
+Type=Application\n\
+Name=File Manager\n\
+Comment=File Manager\n\
+Exec=pcmanfm\n\
+Icon=system-file-manager\n\
+Terminal=false\n\
+Categories=System;FileTools;" > ~/Desktop/pcmanfm.desktop\n\
+\n\
+chmod +x ~/Desktop/*.desktop\n\
+\n\
+# Start applications in background\n\
+pcmanfm --desktop & \n\
+firefox --display=$DISPLAY & \n\
+\n\
+# Health check endpoint\n\
+while true; do\n\
+    echo -e "HTTP/1.1 200 OK\\n\\nOK" | nc -l -p 8081 -q 1\n\
+done & \n\
+\n\
+# Keep container running\n\
+tail -f /dev/null' > /start.sh && chmod +x /start.sh
 
-# Create a robust WebSocket proxy that handles HEAD requests
-RUN cat > /ws_server.py << 'EOF'
-#!/usr/bin/env python3
-from simple_websocket_server import WebSocketServer, WebSocket
-import socket
-import threading
-import time
+# Set working directory
+WORKDIR /root
 
-class VNCProxy(WebSocket):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.vnc_socket = None
-        self.running = True
-        
-    def connected(self):
-        print(f"WebSocket connected from {self.address}")
-        try:
-            # Connect to VNC server
-            self.vnc_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.vnc_socket.connect(('localhost', 5900))
-            self.vnc_socket.setblocking(False)
-            
-            # Start thread to read from VNC
-            self.thread = threading.Thread(target=self.read_from_vnc)
-            self.thread.daemon = True
-            self.thread.start()
-        except Exception as e:
-            print(f"Error connecting to VNC: {e}")
-            self.send_message("ERROR: Cannot connect to VNC server")
-            self.close()
-    
-    def handle(self):
-        # Send received data to VNC server
-        if self.vnc_socket:
-            try:
-                self.vnc_socket.send(self.data)
-            except:
-                pass
-    
-    def read_from_vnc(self):
-        while self.running and self.vnc_socket:
-            try:
-                data = self.vnc_socket.recv(4096)
-                if data:
-                    self.send_message(data)
-                else:
-                    break
-            except socket.error:
-                time.sleep(0.01)
-            except:
-                break
-    
-    def handle_close(self):
-        print(f"WebSocket closed from {self.address}")
-        self.running = False
-        if self.vnc_socket:
-            self.vnc_socket.close()
+# Expose port
+EXPOSE 8080
+EXPOSE 8081
 
-# Create HTTP server that handles HEAD requests
-from http.server import HTTPServer, BaseHTTPRequestHandler
-import threading
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8081/ || exit 1
 
-class HealthHandler(BaseHTTPRequestHandler):
-    def do_HEAD(self):
-        self.send_response(200)
-        self.end_headers()
-    
-    def do_GET(self):
-        if self.path == '/':
-            self.send_response(200)
-            self.send_header('Content-type', 'text/html')
-            self.end_headers()
-            self.wfile.write(b'<html><body><h1>VNC Server Ready</h1><p>Connect with VNC client to port 5900</p></body></html>')
-        else:
-            self.send_response(404)
-            self.end_headers()
-    
-    def log_message(self, format, *args):
-        pass  # Disable logging
-
-def start_http_server():
-    server = HTTPServer(('0.0.0.0', 6080), HealthHandler)
-    print("HTTP server started on port 6080")
-    server.serve_forever()
-
-if __name__ == "__main__":
-    # Start HTTP server in background thread
-    http_thread = threading.Thread(target=start_http_server)
-    http_thread.daemon = True
-    http_thread.start()
-    
-    # Start WebSocket server
-    print("WebSocket server starting on port 6081")
-    server = WebSocketServer('0.0.0.0', 6081, VNCProxy)
-    server.serve_forever()
-EOF
-
-# HTML
-RUN mkdir -p /var/www/html && \
-    echo '<html><body>
-    <h1>VNC Desktop</h1>
-    <p>Starting VNC server...</p>
-    <script>
-    setTimeout(() => location.reload(), 3000);
-    </script>
-    </body></html>' > /var/www/html/index.html
-
-EXPOSE 80
-
-# Start everything
-CMD echo "Starting VNC Desktop..." && \
-    rm -f /tmp/.X1-lock && \
-    # Start Xvfb
-    Xvfb :1 -screen 0 1024x768x24 & \
-    sleep 3 && \
-    # Start fluxbox
-    fluxbox & \
-    sleep 2 && \
-    # Start Firefox
-    firefox about:blank & \
-    sleep 2 && \
-    # Start x11vnc with NO WebSocket
-    x11vnc -display :1 -forever -shared -rfbauth ~/.vnc/passwd -localhost -nosel -noxdamage & \
-    sleep 2 && \
-    # Start Python server
-    python3 /ws_server.py & \
-    sleep 2 && \
-    # Start nginx
-    echo "VNC Desktop Ready!" && \
-    echo "Web: https://$(hostname)" && \
-    echo "VNC: $(hostname):5900" && \
-    echo "Password: ${VNC_PASSWORD}" && \
-    nginx -g 'daemon off;'
+# Start the service
+CMD ["/start.sh"]

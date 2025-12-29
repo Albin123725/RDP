@@ -7,6 +7,7 @@ ENV TZ=UTC
 ENV HOME=/root
 ENV DISPLAY=:99
 ENV RESOLUTION=1280x720x24
+ENV PORT=8080
 
 # Install core system components
 RUN apt-get update && apt-get upgrade -y && \
@@ -22,12 +23,12 @@ RUN apt-get update && apt-get upgrade -y && \
     # File manager
     pcmanfm \
     # Utilities
-    wget curl git unzip software-properties-common \
+    wget curl git unzip software-properties-common netcat-openbsd \
     # Fonts
     fonts-liberation fonts-noto fonts-ubuntu fonts-noto-cjk \
     # Audio
     pulseaudio pavucontrol \
-    # Video codecs (updated package names)
+    # Video codecs
     libavcodec-extra libx264-dev libx265-dev gstreamer1.0-libav \
     # WebRTC and media support
     libgstreamer-plugins-base1.0-0 libgstreamer1.0-0 \
@@ -54,19 +55,21 @@ Xvfb $DISPLAY -screen 0 ${RESOLUTION} -ac +extension GLX +render -noreset & \n\
 # Start VNC server\n\
 x11vnc -display $DISPLAY -noxdamage -forever -shared -rfbport 5900 -passwd ${VNC_PASSWORD:-password123} & \n\
 \n\
-# Start noVNC\n\
-/opt/noVNC/utils/novnc_proxy --vnc localhost:5900 --listen 8080 --web /opt/noVNC & \n\
+# Start noVNC on the port Render expects (usually 10000 or $PORT)\n\
+/opt/noVNC/utils/novnc_proxy --vnc localhost:5900 --listen ${PORT:-8080} --web /opt/noVNC & \n\
 \n\
 # Wait for Xvfb\n\
 sleep 2\n\
 \n\
 # Set up Openbox\n\
-openbox --config-file /etc/xdg/openbox/rc.xml & \n\
+mkdir -p ~/.config/openbox\n\
+cp /etc/xdg/openbox/* ~/.config/openbox/\n\
+openbox --config-file ~/.config/openbox/rc.xml & \n\
 \n\
-# Create Firefox profile directory\n\
+# Create Firefox profile\n\
 mkdir -p ~/.mozilla/firefox\n\
 \n\
-# Set Firefox preferences for better performance\n\
+# Set Firefox preferences\n\
 cat > ~/.mozilla/firefox/profiles.ini << "EOF"\n\
 [General]\n\
 StartWithLastProfile=1\n\
@@ -82,9 +85,9 @@ mkdir -p ~/.mozilla/firefox/default.default\n\
 cat > ~/.mozilla/firefox/default.default/user.js << "EOF"\n\
 user_pref("browser.cache.disk.enable", true);\n\
 user_pref("browser.cache.memory.enable", true);\n\
-user_pref("browser.sessionstore.interval", 15000);\n\
+user_pref("browser.sessionstore.interval", 30000);\n\
 user_pref("browser.startup.homepage", "about:blank");\n\
-user_pref("dom.ipc.processCount", 8);\n\
+user_pref("dom.ipc.processCount", 4);\n\
 user_pref("media.autoplay.default", 0);\n\
 user_pref("media.ffmpeg.vaapi.enabled", true);\n\
 user_pref("media.hardware-video-decoding.enabled", true);\n\
@@ -96,6 +99,7 @@ user_pref("webgl.disabled", false);\n\
 user_pref("layers.acceleration.force-enabled", true);\n\
 user_pref("gfx.webrender.all", true);\n\
 user_pref("gfx.webrender.enabled", true);\n\
+user_pref("browser.tabs.remote.autostart", true);\n\
 EOF\n\
 \n\
 # Create desktop shortcuts\n\
@@ -138,70 +142,29 @@ EOF\n\
 \n\
 chmod +x ~/Desktop/*.desktop\n\
 \n\
-# Create Openbox menu\n\
-mkdir -p ~/.config/openbox\n\
-cat > ~/.config/openbox/menu.xml << "EOF"\n\
-<?xml version="1.0" encoding="UTF-8"?>\n\
-<openbox_menu xmlns="http://openbox.org/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://openbox.org/ menu.xsd">\n\
-<menu id="root-menu" label="Applications">\n\
-  <item label="Firefox">\n\
-    <action name="Execute">\n\
-      <execute>firefox</execute>\n\
-    </action>\n\
-  </item>\n\
-  <item label="Terminal">\n\
-    <action name="Execute">\n\
-      <execute>xterm</execute>\n\
-    </action>\n\
-  </item>\n\
-  <item label="File Manager">\n\
-    <action name="Execute">\n\
-      <execute>pcmanfm</execute>\n\
-    </action>\n\
-  </item>\n\
-  <separator/>\n\
-  <menu id="exit-menu" label="Exit">\n\
-    <item label="Log Out">\n\
-      <action name="Exit">\n\
-        <prompt>yes</prompt>\n\
-      </action>\n\
-    </item>\n\
-  </menu>\n\
-</menu>\n\
-</openbox_menu>\n\
-EOF\n\
-\n\
-# Start applications\n\
+# Start file manager as desktop\n\
 pcmanfm --desktop & \n\
 \n\
-# Wait a bit for everything to initialize\n\
-sleep 3\n\
-\n\
-# Start Firefox (optional - you can remove this line if you don'\''t want it to auto-start)\n\
-# firefox --display=$DISPLAY &\n\
-\n\
-# Health check endpoint\n\
+# Simple web server for health checks on port 10000\n\
 while true; do\n\
-    echo -e "HTTP/1.1 200 OK\\n\\nOK" | nc -l -p 8081 -q 1\n\
+    echo -e "HTTP/1.1 200 OK\\nContent-Type: text/html\\n\\n<html><body><h1>VNC Ready</h1><p>Access via /vnc.html</p></body></html>" | nc -l -p 10000 -q 1\n\
 done & \n\
+\n\
+echo "=========================================="\n\
+echo "VNC Server is running!"\n\
+echo "Access at: http://localhost:${PORT:-8080}/vnc.html"\n\
+echo "Password: ${VNC_PASSWORD:-password123}"\n\
+echo "=========================================="\n\
 \n\
 # Keep container running\n\
 tail -f /dev/null' > /start.sh && chmod +x /start.sh
 
-# Create a simple health check script
-RUN echo '#!/bin/bash\n\
-curl -f http://localhost:8081/ || exit 1' > /healthcheck.sh && chmod +x /healthcheck.sh
-
 # Set working directory
 WORKDIR /root
 
-# Expose ports
-EXPOSE 8080  # noVNC
-EXPOSE 8081  # Health check
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-    CMD /healthcheck.sh
+# Expose ports (Render will map these automatically)
+EXPOSE 8080
+EXPOSE 10000
 
 # Start the service
 CMD ["/start.sh"]

@@ -1,4 +1,3 @@
-# render.yaml - SIMPLE WORKING VERSION
 services:
   - type: web
     name: novnc-rdp
@@ -9,4 +8,8 @@ services:
     envVars:
       - key: VNC_PASSWORD
         value: "password123"
+      - key: DISPLAY_WIDTH
+        value: "1280"
+      - key: DISPLAY_HEIGHT
+        value: "720"
     healthCheckPath: /

@@ -8,8 +8,9 @@ services:
     envVars:
       - key: VNC_PASSWORD
         value: "password123"
-      - key: DISPLAY_WIDTH
-        value: "1280"
-      - key: DISPLAY_HEIGHT
-        value: "720"
+      - key: DISPLAY
+        value: ":99"
+    # Use simple path for health check
     healthCheckPath: /
+    # Increase timeout for slow startup
+    healthCheckTimeout: 120s

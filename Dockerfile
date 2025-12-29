@@ -1,143 +1,166 @@
 FROM ubuntu:22.04
 
-ENV DEBIAN_FRONTEND=noninteractive
-ENV DISPLAY=:99
-ENV VNC_PASSWORD=password123
-ENV DISPLAY_WIDTH=1280
-ENV DISPLAY_HEIGHT=720
-ENV LANG=en_US.UTF-8
+# Set environment variables
+ENV DEBIAN_FRONTEND=noninteractive \
+    DISPLAY=:99 \
+    VNC_PASSWORD=password123 \
+    RESOLUTION=1280x720x24 \
+    HOME=/root \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8
 
-# Install core packages
-RUN apt-get update && apt-get install -y \
-    sudo wget curl gnupg2 software-properties-common \
-    && apt-get clean
-
-# Add Firefox repository for latest version
-RUN add-apt-repository -y ppa:mozillateam/ppa && \
-    echo 'Package: *\nPin: release o=LP-PPA-mozillateam\nPin-Priority: 1001' > /etc/apt/preferences.d/mozilla-firefox
-
-# Install all packages
-RUN apt-get update && apt-get install -y \
-    # Display
-    xvfb x11vnc \
-    # Window manager
-    openbox obconf \
-    # Apps
-    firefox xterm pcmanfm \
+# Update and install minimal packages
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    # Core display
+    xvfb \
+    # VNC server
+    x11vnc \
+    # Window manager (minimal)
+    fluxbox \
+    # Applications
+    firefox \
+    xterm \
+    pcmanfm \
     # Utilities
-    netcat-openbsd xdotool wmctrl \
-    # Fonts
-    fonts-liberation fonts-ubuntu fonts-noto \
+    wget \
+    curl \
+    netcat-openbsd \
     # Dependencies
-    libgl1-mesa-dri libgl1-mesa-glx \
-    libgtk-3-0 libdbus-glib-1-2 \
-    libnss3 libxss1 libasound2 \
-    pulseaudio pavucontrol \
-    # Video
-    libavcodec58 libavformat58 libavutil56 libswscale5 \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
+    libgl1-mesa-dri \
+    libgl1-mesa-glx \
+    libgtk-3-0 \
+    libnss3 \
+    libasound2 \
+    libxss1 \
+    # Fonts
+    fonts-liberation \
+    # Audio (optional)
+    pulseaudio \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install noVNC
-WORKDIR /opt
-RUN wget -q https://github.com/novnc/noVNC/archive/refs/tags/v1.4.0.tar.gz -O novnc.tar.gz && \
-    tar -xzf novnc.tar.gz && \
-    mv noVNC-1.4.0 noVNC && \
-    rm novnc.tar.gz
-
-RUN wget -q https://github.com/novnc/websockify/archive/refs/tags/v0.11.0.tar.gz -O websockify.tar.gz && \
-    tar -xzf websockify.tar.gz && \
+# Install noVNC (simpler method)
+WORKDIR /tmp
+RUN wget -q https://github.com/novnc/noVNC/archive/v1.4.0.tar.gz && \
+    tar -xzf v1.4.0.tar.gz && \
+    mv noVNC-1.4.0 /opt/noVNC && \
+    wget -q https://github.com/novnc/websockify/archive/v0.11.0.tar.gz && \
+    tar -xzf v0.11.0.tar.gz && \
     mv websockify-0.11.0 /opt/noVNC/utils/websockify && \
-    rm websockify.tar.gz
+    rm -f *.tar.gz
 
-# Create startup script
+# Create a simple startup script
 RUN echo '#!/bin/bash\n\
 \n\
-echo "Starting Xvfb on display $DISPLAY..."\n\
-Xvfb $DISPLAY -screen 0 ${DISPLAY_WIDTH}x${DISPLAY_HEIGHT}x24 -ac +extension GLX +render -noreset &\n\
+# Kill any existing processes\n\
+pkill -9 Xvfb 2>/dev/null\n\
+pkill -9 x11vnc 2>/dev/null\n\
+\n\
+# Start X virtual framebuffer\n\
+echo "Starting Xvfb..."\n\
+Xvfb $DISPLAY -screen 0 ${RESOLUTION} -ac +extension GLX +render -noreset > /dev/null 2>&1 &\n\
 sleep 2\n\
 \n\
+# Start VNC server\n\
 echo "Starting VNC server..."\n\
-x11vnc -display $DISPLAY -forever -shared -rfbport 5900 -passwd $VNC_PASSWORD -noxdamage -bg\n\
+x11vnc -display $DISPLAY -forever -shared -rfbport 5900 -passwd $VNC_PASSWORD -noxdamage -bg > /dev/null 2>&1\n\
 sleep 2\n\
 \n\
-echo "Starting noVNC..."\n\
-/opt/noVNC/utils/novnc_proxy --vnc localhost:5900 --listen 8080 --web /opt/noVNC &\n\
+# Start noVNC\n\
+echo "Starting noVNC web interface..."\n\
+cd /opt/noVNC\n\
+./utils/novnc_proxy --vnc localhost:5900 --listen 8080 > /dev/null 2>&1 &\n\
 sleep 2\n\
 \n\
-echo "Starting Openbox..."\n\
-openbox &\n\
+# Start window manager\n\
+echo "Starting Fluxbox..."\n\
+fluxbox > /dev/null 2>&1 &\n\
 sleep 1\n\
 \n\
+# Start file manager as desktop\n\
 echo "Starting desktop..."\n\
-pcmanfm --desktop &\n\
+pcmanfm --desktop > /dev/null 2>&1 &\n\
 sleep 1\n\
 \n\
-# Create desktop shortcuts\n\
-mkdir -p ~/Desktop\n\
-cat > ~/Desktop/firefox.desktop <<EOF\n\
-[Desktop Entry]\n\
-Version=1.0\n\
-Type=Application\n\
-Name=Firefox\n\
-Comment=Web Browser\n\
-Exec=firefox\n\
-Icon=firefox\n\
-Terminal=false\n\
-Categories=Network;WebBrowser;\n\
+# Create simple index.html\n\
+mkdir -p /opt/www\n\
+cat > /opt/www/index.html << EOF\n\
+<!DOCTYPE html>\n\
+<html>\n\
+<head>\n\
+    <title>VNC Remote Desktop</title>\n\
+    <style>\n\
+        body { font-family: Arial, sans-serif; margin: 40px; }\n\
+        .container { max-width: 800px; margin: 0 auto; }\n\
+        .btn { display: inline-block; padding: 12px 24px; background: #007bff; color: white; text-decoration: none; border-radius: 4px; margin: 10px; }\n\
+        .btn:hover { background: #0056b3; }\n\
+    </style>\n\
+</head>\n\
+<body>\n\
+    <div class="container">\n\
+        <h1>🎮 Remote Desktop Ready!</h1>\n\
+        <p>Your VNC remote desktop is running and ready to use.</p>\n\
+        \n\
+        <h2>📱 Access Options:</h2>\n\
+        <p>\n\
+            <a href="/vnc.html" class="btn">Launch VNC Client</a>\n\
+            <a href="/vnc.html?autoconnect=true" class="btn">Auto-connect VNC</a>\n\
+        </p>\n\
+        \n\
+        <h2>🔑 Connection Details:</h2>\n\
+        <ul>\n\
+            <li><strong>Password:</strong> password123</li>\n\
+            <li><strong>Resolution:</strong> 1280x720</li>\n\
+            <li><strong>Applications:</strong> Firefox, Terminal, File Manager</li>\n\
+        </ul>\n\
+        \n\
+        <h2>⚠️ Important Notes:</h2>\n\
+        <ul>\n\
+            <li>First connection may take 30-60 seconds (Render free tier cold start)</li>\n\
+            <li>If VNC doesn't load, wait 1 minute and refresh</li>\n\
+            <li>For best performance, close unused browser tabs</li>\n\
+        </ul>\n\
+        \n\
+        <h2>🔧 Troubleshooting:</h2>\n\
+        <p>If you see "Bad Gateway":</p>\n\
+        <ol>\n\
+            <li>Wait 2-3 minutes for full startup</li>\n\
+            <li>Refresh the page</li>\n\
+            <li>Clear browser cache</li>\n\
+            <li>Try direct link: <a href="/vnc.html?host=\$(hostname)&port=443&path=vnc.html">Direct Connect</a></li>\n\
+        </ol>\n\
+    </div>\n\
+</body>\n\
+</html>\n\
 EOF\n\
 \n\
-cat > ~/Desktop/terminal.desktop <<EOF\n\
-[Desktop Entry]\n\
-Version=1.0\n\
-Type=Application\n\
-Name=Terminal\n\
-Comment=Terminal Emulator\n\
-Exec=xterm\n\
-Icon=utilities-terminal\n\
-Terminal=false\n\
-Categories=System;TerminalEmulator;\n\
-EOF\n\
-\n\
-cat > ~/Desktop/filemanager.desktop <<EOF\n\
-[Desktop Entry]\n\
-Version=1.0\n\
-Type=Application\n\
-Name=File Manager\n\
-Comment=File Manager\n\
-Exec=pcmanfm\n\
-Icon=system-file-manager\n\
-Terminal=false\n\
-Categories=System;FileTools;\n\
-EOF\n\
-\n\
-chmod +x ~/Desktop/*.desktop\n\
-\n\
-# Set Firefox preferences for better performance\n\
-mkdir -p ~/.mozilla/firefox/default\n\
-echo '\''{\n\
-  "browser.cache.disk.enable": true,\n\
-  "browser.cache.memory.enable": true,\n\
-  "browser.startup.homepage": "about:blank",\n\
-  "media.autoplay.default": 0,\n\
-  "media.ffmpeg.vaapi.enabled": true,\n\
-  "media.hardware-video-decoding.enabled": true\n\
-}'\'' > ~/.mozilla/firefox/default/prefs.js\n\
-\n\
-echo "=========================================="\n\
-echo "VNC Server is running!"\n\
-echo "Connect to: http://$(hostname -i):8080/vnc.html"\n\
-echo "Password: $VNC_PASSWORD"\n\
-echo "=========================================="\n\
-\n\
-# Start a simple web server on port 10000 for health checks\n\
+# Start a simple web server on port 10000\n\
+echo "Starting web server..."\n\
 while true; do\n\
-    printf "HTTP/1.1 200 OK\\r\\nContent-Length: 12\\r\\n\\r\\nVNC Ready\\n" | nc -l -p 10000 -q 1\n\
-done &\n\
+    cd /opt/www\n\
+    echo -e "HTTP/1.1 200 OK\\r\\nContent-Type: text/html\\r\\n\\r\\n" | cat - index.html | nc -l -p 10000 -q 1\n\
+done > /dev/null 2>&1 &\n\
 \n\
-# Keep container running\n\
-tail -f /dev/null' > /start.sh && chmod +x /start.sh
+echo "=========================================="\n\
+echo "✅ VNC Service Started Successfully!"\n\
+echo "🌐 Access at: https://your-domain.onrender.com/"\n\
+echo "🔗 VNC Client: /vnc.html"\n\
+echo "🔑 Password: $VNC_PASSWORD"\n\
+echo "💻 Apps: Firefox, Terminal, File Manager"\n\
+echo "=========================================="\n\
+\n\
+# Keep container alive\n\
+while true; do\n\
+    sleep 3600\n\
+done' > /start.sh && chmod +x /start.sh
 
+# Expose ports
 EXPOSE 8080
 EXPOSE 10000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:10000/ || exit 1
 
 CMD ["/start.sh"]

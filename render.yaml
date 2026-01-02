@@ -1,0 +1,9 @@
+services:
+  - name: ubuntu-desktop
+    env: docker
+    dockerfile: Dockerfile
+    plan: free
+    ports:
+      - 6070:80
+
+    
